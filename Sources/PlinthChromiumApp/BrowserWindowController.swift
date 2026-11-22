@@ -33,6 +33,8 @@ final class WindowChrome {
     var flyoutOpen = false
     /// A short message, such as pages being put away on the shelf.
     var notice: String?
+    /// The "where you left off" card, shown only after a site comes back from the shelf (ResumeCards.swift).
+    var resumeCard: ResumeCard?
 }
 
 /// A clear window above the pages that holds what floats over them: the panels and the sidebar's
@@ -58,6 +60,12 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     /// Pages currently placed under the hole, left to right.
     private(set) var shown: [PageID] = []
     private var frameSave: DispatchWorkItem?
+    /// Reads and sums up the page for the resume card.
+    var resumeTask: Task<Void, Never>?
+    /// The resume card's own small window, made on first use.
+    var resumeCardWindow: ResumeCardWindow?
+    var resumeCardRetryPending = false
+    var lastResumeCardSize: CGSize = .zero
 
     init(app: ChromiumApp, windowID: WindowID) {
         self.app = app
@@ -177,6 +185,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
             }
         }
         if chrome.pendingFrames != pending { chrome.pendingFrames = pending }
+        dropResumeCardIfStale()
+        syncResumeCardWindow()
         keepOverlayOnTop()
         for id in chrome.attached.keys where !ids.contains(id) { chrome.attached[id] = nil }
 
@@ -224,12 +234,16 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         return f
     }
 
-    /// Pages are children of the window too; the overlay stays above all of them.
-    /// Child windows stack in the order they were added, so the overlay is re-added last when it isn't.
-    private func keepOverlayOnTop() {
-        guard let children = window.childWindows, children.last !== overlay else { return }
-        window.removeChildWindow(overlay)
-        window.addChildWindow(overlay, ordered: .above)
+    /// Pages are children of the window too; the resume card (when showing) and then the overlay stay
+    /// above all of them. Child windows stack in the order they were added, so those two are re-added
+    /// last when they aren't.
+    func keepOverlayOnTop() {
+        let floating: [NSWindow] = [resumeCardWindow].compactMap { $0 }.filter { $0.parent === window } + [overlay]
+        guard let children = window.childWindows,
+              !zip(children.suffix(floating.count), floating).allSatisfy({ $0 === $1 }) || children.count < floating.count
+        else { return }
+        for w in floating { window.removeChildWindow(w) }
+        for w in floating { window.addChildWindow(w, ordered: .above) }
         overlay.setFrame(overlayFrame, display: false)
     }
 
@@ -335,7 +349,9 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
                 if isPrivate {
                     if let url = store.url(of: result.target) { open(url, newPage: true, replacing: selected) }
                 } else {
-                    store.restore(entry: entry, page: page, into: windowID)
+                    let ids = store.restore(entry: entry, page: page, into: windowID)
+                    refreshContent()
+                    showResumeCard(forRestored: ids)
                 }
             case .history(let url):
                 open(url, newPage: true, replacing: selected)
@@ -390,6 +406,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     func windowWillClose(_ notification: Notification) {
         saveFrame()
         for id in shown { app.pool.existing(id)?.attach(to: nil, frame: .zero, cornerRadius: 0) }
+        resumeTask?.cancel()
+        if let card = resumeCardWindow { window.removeChildWindow(card); card.orderOut(nil) }
         window.removeChildWindow(overlay)
         overlay.orderOut(nil)
         shown = []

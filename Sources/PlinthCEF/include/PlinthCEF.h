@@ -140,6 +140,14 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 - (BOOL)executeChromeCommand:(NSString *)name;
 /// Runs JavaScript in the main frame (fire and forget).
 - (void)executeJavaScript:(NSString *)script;
+/// Evaluates `expression` in the main frame (in Plinth's renderer helper, through a process message)
+/// and hands back its value as Foundation objects: NSString, NSNumber, NSNull, NSArray and
+/// NSDictionary. Promises and functions are not followed. `completion` runs once on the main
+/// thread, with nil if the page has no browser yet, the script threw, or no answer came within a
+/// few seconds (the page navigated or its renderer went away).
+- (void)evaluateJavaScript:(NSString *)expression completion:(void (^)(id _Nullable result))completion;
+/// The main frame's plain text (Chromium's own text dump, no structure), or nil.
+- (void)readPlainText:(void (^)(NSString *_Nullable text))completion;
 /// Shows the page's window as a child above `parent`, filling `frame` (screen coordinates) with its
 /// corners rounded to `cornerRadius`, or hides it when `parent` is nil. Pages sit above Plinth's
 /// window so they get clicks and keys directly.

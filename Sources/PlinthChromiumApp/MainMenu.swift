@@ -10,6 +10,7 @@ enum MainMenu {
         add(appMenu, "About Plinth", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", target: NSApp)
         appMenu.addItem(.separator())
         add(appMenu, "Settings…", #selector(ChromiumApp.menuSettings(_:)), ",", target: app)
+        add(appMenu, "Use On-Device AI", #selector(ChromiumApp.menuToggleAI(_:)), "", target: app)
         appMenu.addItem(.separator())
         add(appMenu, "Hide Plinth", #selector(NSApplication.hide(_:)), "h", target: NSApp)
         add(appMenu, "Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option], target: NSApp)
@@ -26,6 +27,8 @@ enum MainMenu {
         add(file, "Close Page", #selector(ChromiumApp.menuClosePage(_:)), "w", target: app)
         add(file, "Close Window", #selector(ChromiumApp.menuCloseWindow(_:)), "w", [.command, .shift], target: app)
         add(file, "Reopen Closed Page", #selector(ChromiumApp.menuReopen(_:)), "t", [.command, .shift], target: app)
+        file.addItem(.separator())
+        add(file, "Move to Main Window", #selector(ChromiumApp.menuPromoteMini(_:)), "\r", [.command, .shift], target: app)
 
         // Edit items go to the first responder: the page, or a Plinth text field.
         let edit = submenu(main, "Edit")

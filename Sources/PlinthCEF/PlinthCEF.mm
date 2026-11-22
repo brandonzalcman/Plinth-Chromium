@@ -14,6 +14,8 @@
 #include "include/cef_cookie.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_id_mappers.h"
+#include "include/cef_process_message.h"
+#include "include/cef_values.h"
 #include "include/cef_request_context.h"
 #include "include/cef_version_info.h"
 #include "include/views/cef_box_layout.h"
@@ -42,6 +44,38 @@ static CefRect CefRectFromScreenRect(NSRect r) {
     CGFloat primaryHeight = NSScreen.screens.firstObject.frame.size.height;
     return CefRect((int)r.origin.x, (int)(primaryHeight - r.origin.y - r.size.height), (int)r.size.width,
                    (int)r.size.height);
+}
+
+/// The process messages the renderer helper answers (see PlinthChromiumHelper/main.mm).
+static const char *kEvalMessage = "plinth.eval";
+static const char *kEvalResultMessage = "plinth.eval.result";
+/// How long a script's answer is waited for.
+static const int64_t kEvalTimeout = 6 * NSEC_PER_SEC;
+
+/// A CefValue from the renderer as Foundation objects.
+static id NSObjectFromCefValue(CefRefPtr<CefValue> value, int depth) {
+    if (!value || depth > 12) return NSNull.null;
+    switch (value->GetType()) {
+    case VTYPE_BOOL: return @(value->GetBool());
+    case VTYPE_INT: return @(value->GetInt());
+    case VTYPE_DOUBLE: return @(value->GetDouble());
+    case VTYPE_STRING: return NSStringFromCef(value->GetString());
+    case VTYPE_LIST: {
+        CefRefPtr<CefListValue> list = value->GetList();
+        NSMutableArray *array = [NSMutableArray arrayWithCapacity:list->GetSize()];
+        for (size_t i = 0; i < list->GetSize(); i++) [array addObject:NSObjectFromCefValue(list->GetValue(i), depth + 1)];
+        return array;
+    }
+    case VTYPE_DICTIONARY: {
+        CefRefPtr<CefDictionaryValue> dict = value->GetDictionary();
+        CefDictionaryValue::KeyList keys;
+        dict->GetKeys(keys);
+        NSMutableDictionary *result = [NSMutableDictionary dictionaryWithCapacity:keys.size()];
+        for (const CefString &key : keys) result[NSStringFromCef(key)] = NSObjectFromCefValue(dict->GetValue(key), depth + 1);
+        return result;
+    }
+    default: return NSNull.null;
+    }
 }
 
 static void PLog(NSString *message) {
@@ -370,6 +404,7 @@ static void ApplyPlinthPreferences(CefRefPtr<CefRequestContext> context) {
 - (void)_hostDestroyed;
 - (void)_hostActivated;
 - (BOOL)_hostCanClose;
+- (void)_evaluationFinished:(int)requestID value:(nullable id)value;
 @property (readwrite, copy) NSString *address;
 @property (readwrite, copy) NSString *title;
 @property (readwrite) BOOL isLoading;
@@ -542,6 +577,18 @@ public:
         return BlockedChromeCommands().count(commandID) == 0;
     }
 
+    // Answers from the renderer helper to -evaluateJavaScript:completion:.
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefProcessId source,
+                                  CefRefPtr<CefProcessMessage> message) override {
+        if (source != PID_RENDERER || message->GetName().ToString() != kEvalResultMessage) return false;
+        CefRefPtr<CefListValue> args = message->GetArgumentList();
+        if (args->GetSize() < 3) return true;
+        int requestID = args->GetInt(0);
+        id value = args->GetBool(1) ? NSObjectFromCefValue(args->GetValue(2), 0) : nil;
+        [owner_ _evaluationFinished:requestID value:value];
+        return true;
+    }
+
 private:
     __weak PCEFBrowser *owner_;
     IMPLEMENT_REFCOUNTING(BrowserClient);
@@ -597,6 +644,20 @@ private:
     IMPLEMENT_REFCOUNTING(PopupWindowDelegate);
 };
 
+/// Hands the main frame's text to a block (CefFrame::GetText).
+class TextVisitor : public CefStringVisitor {
+public:
+    explicit TextVisitor(void (^done)(NSString *)) : done_([done copy]) {}
+    void Visit(const CefString &string) override {
+        if (done_) done_(NSStringFromCef(string));
+        done_ = nil;
+    }
+
+private:
+    void (^done_)(NSString *);
+    IMPLEMENT_REFCOUNTING(TextVisitor);
+};
+
 /// The borderless window that holds one page's browser view.
 class HostWindowDelegate : public CefWindowDelegate {
 public:
@@ -648,7 +709,11 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
     NSString *_pendingURL;
     BOOL _closed;
     double _pendingZoom;
+    /// Scripts sent to the renderer and waiting for an answer, by request number.
+    NSMutableDictionary<NSNumber *, void (^)(id)> *_evaluations;
 }
+
+static int gNextEvaluationID = 1;
 
 - (instancetype)initWithURL:(NSString *)url profile:(PCEFProfile *)profile delegate:(id<PCEFBrowserDelegate>)delegate {
     if ((self = [super init])) {
@@ -722,6 +787,7 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
 }
 
 - (void)_destroyed {
+    [self _failEvaluations];
     _browser = nullptr;
     _client = nullptr;
     if (_host) _host->Close();
@@ -763,6 +829,55 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
 
 - (void)executeJavaScript:(NSString *)script {
     if (_browser) _browser->GetMainFrame()->ExecuteJavaScript(CefFromNSString(script), "", 0);
+}
+
+- (void)evaluateJavaScript:(NSString *)expression completion:(void (^)(id))completion {
+    void (^done)(id) = [completion copy];
+    if (!_browser || _closed) {
+        dispatch_async(dispatch_get_main_queue(), ^{ done(nil); });
+        return;
+    }
+    int requestID = gNextEvaluationID++;
+    if (!_evaluations) _evaluations = [NSMutableDictionary dictionary];
+    _evaluations[@(requestID)] = done;
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kEvalMessage);
+    message->GetArgumentList()->SetInt(0, requestID);
+    message->GetArgumentList()->SetString(1, CefFromNSString(expression));
+    _browser->GetMainFrame()->SendProcessMessage(PID_RENDERER, message);
+    // The renderer can go away mid-navigation without answering.
+    __weak PCEFBrowser *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kEvalTimeout), dispatch_get_main_queue(), ^{
+        [weakSelf _evaluationFinished:requestID value:nil];
+    });
+}
+
+- (void)_evaluationFinished:(int)requestID value:(id)value {
+    void (^done)(id) = _evaluations[@(requestID)];
+    if (!done) return;
+    [_evaluations removeObjectForKey:@(requestID)];
+    done(value);
+}
+
+- (void)_failEvaluations {
+    NSDictionary<NSNumber *, void (^)(id)> *pending = [_evaluations copy];
+    [_evaluations removeAllObjects];
+    for (NSNumber *key in pending) pending[key](nil);
+}
+
+- (void)readPlainText:(void (^)(NSString *))completion {
+    __block void (^done)(NSString *) = [completion copy];
+    if (!_browser || _closed) {
+        dispatch_async(dispatch_get_main_queue(), ^{ done(nil); });
+        return;
+    }
+    void (^once)(NSString *) = ^(NSString *text) {
+        if (!done) return;
+        void (^call)(NSString *) = done;
+        done = nil;
+        call(text);
+    };
+    _browser->GetMainFrame()->GetText(new TextVisitor(once));
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kEvalTimeout), dispatch_get_main_queue(), ^{ once(nil); });
 }
 
 - (void)close {

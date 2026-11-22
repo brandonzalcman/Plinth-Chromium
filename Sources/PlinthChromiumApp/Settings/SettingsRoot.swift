@@ -3,10 +3,10 @@ import AppKit
 import PlinthPanels
 
 /// The sections, in sidebar order. The raw value is the stable id used by `select(section:)`.
-/// The Mac app's Passwords, Downloads, On-device AI and Import sections are left out:
+/// The Mac app's Passwords, Downloads and Import sections are left out:
 /// those features aren't in the Chromium build yet.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, startup, appearance, loyalty, privacy, extensions, about
+    case general, startup, appearance, loyalty, privacy, ai, extensions, about
     var id: String { rawValue }
 
     var title: String {
@@ -16,6 +16,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: "Appearance"
         case .loyalty: "Points & Levels"
         case .privacy: "Privacy & Security"
+        case .ai: "On-device AI"
         case .extensions: "Extensions"
         case .about: "About"
         }
@@ -28,6 +29,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: "paintbrush"
         case .loyalty: "rosette"
         case .privacy: "hand.raised"
+        case .ai: "sparkles"
         case .extensions: "puzzlepiece.extension"
         case .about: "info.circle"
         }
@@ -68,6 +70,7 @@ struct SettingsRoot: View {
         case .appearance: AppearanceSettingsView(app: app)
         case .loyalty: LoyaltySettingsView(app: app)
         case .privacy: PrivacySettingsView(app: app)
+        case .ai: AISettingsView(app: app)
         case .extensions: ExtensionsSettingsView(app: app)
         case .about: AboutSettingsView()
         }

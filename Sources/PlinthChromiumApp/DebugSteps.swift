@@ -10,7 +10,8 @@ import PlinthSidebar
 ///
 /// wait <s> · open <url> · nav <url> · select <n> (⌘-number) · pin · unpin · folder · keep · putaway ·
 /// split · layout dock|sidebar · collapse · command · shelf · close · extensions · popup <n> · state ·
-/// js <script> · quit
+/// js <script> · readtext · dwell <s> · meaning <query> · restore · card · clickcard · mini <url> · promote · promotekey ·
+/// minikey · quit
 @MainActor
 enum DebugSteps {
     static func runIfRequested(_ app: ChromiumApp) {
@@ -88,7 +89,8 @@ enum DebugSteps {
             log("layout=\(app.prefs.value.tabLayout.rawValue) pins=\(pins) sites=\(sites) shelf=\(store.shelf.count) "
                 + "selected=\(selected?.name ?? "-") url=\(selected?.url.absoluteString ?? "-") "
                 + "title=\(browser?.title ?? "-") hostAttached=\(browser?.hostWindow?.parent != nil) "
-                + "window=\(app.keyController.map { NSStringFromRect($0.window.frame) } ?? "-")")
+                + "window=\(app.keyController.map { NSStringFromRect($0.window.frame) } ?? "-") "
+                + "ai=\(app.ai.availability) minis=\(app.miniWindows.map { $0.browser?.address ?? "-" })")
         case "geom":
             if let c = app.keyController {
                 log("parent \(NSStringFromRect(c.window.frame)) content \(NSStringFromRect(c.window.contentView?.frame ?? .zero)) attached \(c.chrome.attached.values.map { NSStringFromRect(c.window.convertToScreen($0)) })")
@@ -122,6 +124,83 @@ enum DebugSteps {
             }
         case "settings":
             app.showSettings()
+        case "readtext":
+            // The selected page's readable text, as semantic history and the resume card get it (lengths only).
+            guard let page = window()?.selectedPageID else { log("readtext: no page"); return }
+            if let text = await app.pool.readableText(for: page) {
+                log("readtext: title=\(text.title) chars=\(text.text.count) focus=\(text.focusExcerpt?.count ?? -1) "
+                    + "scroll=\(text.scrollFraction.map { String(format: "%.2f", $0) } ?? "-") start=\(text.text.prefix(80).replacingOccurrences(of: "\n", with: " / "))")
+            } else {
+                log("readtext: nil")
+            }
+        case "dwell":
+            // Pretend the visible pages have been read for a while, then index them.
+            for page in window()?.visiblePageIDs ?? [] {
+                store.recordDwell(page, seconds: Double(arg) ?? 40)
+                app.indexForMeaningIfNeeded(page)
+            }
+            log("dwell: ai=\(app.ai.availability) indexed=\(app.indexedHistory.count)")
+        case "meaning":
+            let raw = await app.ai.semanticSearch(arg, limit: 8)
+            log("raw '\(arg)': " + raw.map { "\($0.title)=\(String(format: "%.2f", $0.score))" }.joined(separator: ", "))
+            let results = await app.semanticResults(for: arg)
+            log("meaning '\(arg)': " + results.map { "\($0.title) [\($0.byMeaning)]" }.joined(separator: " | "))
+        case "restore":
+            // Brings the newest shelf entry back, as the shelf's Restore does.
+            guard let entry = store.shelf.first, let controller = app.controller(for: wid) else { log("restore: shelf empty"); return }
+            let ids = store.restore(entry: entry.id, page: nil, into: wid)
+            controller.refreshContent()
+            controller.showResumeCard(forRestored: ids)
+            log("restore: \(entry.name) pages=\(ids.count)")
+        case "card":
+            guard let controller = app.controller(for: wid) else { return }
+            let card = controller.chrome.resumeCard
+            let w = controller.resumeCardWindow
+            let children = controller.window.childWindows ?? []
+            let order = children.map { $0 === controller.overlay ? "overlay" : ($0 === w ? "card" : "page") }
+            var topmost = "-"
+            if let w, w.isVisible {
+                let point = NSPoint(x: w.frame.maxX - 43, y: w.frame.maxY - 37)
+                let number = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
+                topmost = number == w.windowNumber ? "card" : number == controller.overlay.windowNumber ? "overlay" : "\(number)"
+            }
+            log("card: page=\(card.flatMap { store.page($0.page)?.name } ?? "-") loading=\(card?.isLoading ?? false) "
+                + "summary=\(card?.summary ?? "-") window=\(w.map { NSStringFromRect($0.frame) } ?? "-") visible=\(w?.isVisible ?? false) "
+                + "children=\(order) overlayIgnoresMouse=\(controller.overlay.ignoresMouseEvents) topmostAtClose=\(topmost)")
+        case "clickcard":
+            // A mouse click on the card's × through AppKit (the window's own event path, not the window server's).
+            guard let w = app.controller(for: wid)?.resumeCardWindow, w.isVisible else { log("clickcard: no card"); return }
+            let point = NSPoint(x: w.frame.width - 43, y: w.frame.height - 37)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                    w.sendEvent(event)
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+            log("clickcard: card now \(app.controller(for: wid)?.chrome.resumeCard == nil ? "dismissed" : "still showing")")
+        case "mini":
+            if let url = URL(string: arg) { app.openFromOtherApp(url) }
+            log("mini: \(app.miniWindows.count) open")
+        case "minikey":
+            // Makes the first mini window key, as if clicked.
+            app.miniWindows.first?.window.makeKeyAndOrderFront(nil)
+        case "promotekey":
+            // ⇧⌘↩ through the menu bar, as a key press in the mini window's page would send it.
+            let window = app.keyMiniWindow?.window
+            if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift],
+                                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window?.windowNumber ?? 0,
+                                            context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36) {
+                log("promotekey: keyMini=\(window != nil) handled=\(NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false) minis=\(app.miniWindows.count)")
+            }
+        case "promote":
+            // ⇧⌘↩ on the mini window in front (or the first one).
+            guard let mini = app.keyMiniWindow ?? app.miniWindows.first else { log("promote: no mini window"); return }
+            let browser = mini.browser
+            app.promote(mini)
+            let page = window()?.selectedPageID
+            let kept = page.flatMap { app.pool.existing($0) } === browser
+            log("promote: minis=\(app.miniWindows.count) selected=\(page.flatMap { store.page($0)?.url.absoluteString } ?? "-") sameBrowser=\(kept)")
         case "quit":
             NSApp.terminate(nil)
         default:

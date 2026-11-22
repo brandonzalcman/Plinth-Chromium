@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import PlinthAI
 import PlinthCEF
 import PlinthExtensions
 import PlinthFade
@@ -32,6 +33,12 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored var settingsWindow: NSWindow?
     /// Points and levels (see Loyalty.swift).
     @ObservationIgnored var loyalty: LoyaltyController!
+    /// On-device AI: resume card summaries and semantic history (see SemanticHistory.swift).
+    @ObservationIgnored var ai: AIService!
+    /// History entries already sent to the semantic index this run.
+    @ObservationIgnored var indexedHistory = Set<UUID>()
+    /// Windows for links from other apps (see MiniWindow.swift).
+    @ObservationIgnored var miniWindows: [MiniWindowController] = []
 
     /// Bumped whenever a page's loading state changes, so the chrome redraws its buttons and progress.
     var loadingTick = 0
@@ -132,6 +139,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         }
         connect()
         setUpLoyalty()
+        setUpAI()
         settings.observe { [weak self] old, new in self?.settingsDidChange(from: old, to: new) }
         prefs.observe { [weak self] old, new in
             guard let self, old.tabLayout != new.tabLayout || old.sidebarCollapsed != new.sidebarCollapsed else { return }
@@ -184,6 +192,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         if old.searchEngine != new.searchEngine { resolver.engine = new.searchEngine }
         if old.appearance != new.appearance { NSApp.appearance = Self.appearance(new.appearance) }
         if old.accent != new.accent { accentChoice = new.accent }
+        applyAISettings(new)
         if old.fadeBehavior != new.fadeBehavior {
             store.setFader(Self.fader(for: new.fadeBehavior))
             scheduleFade()
@@ -214,12 +223,6 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         urls.forEach(openFromOtherApp)
     }
 
-    private func openFromOtherApp(_ url: URL) {
-        guard let id = keyWindowID ?? store.windows.first(where: { !$0.isPrivate })?.id else { return }
-        store.openPage(url: url, in: id)
-        controllers[id]?.window.makeKeyAndOrderFront(nil)
-    }
-
     /// Quit: save, close every page, and let Chromium wind down before the process exits.
     func terminate() {
         PCEFRuntime.log("terminate: \(pool.allBrowsers.count) pages open")
@@ -227,6 +230,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         store.flush()
         ShareCard.removeLeftovers()
         extensions.closePopup()
+        flushAI()
+        for mini in miniWindows { mini.closeBrowser() }
         // Closing for quit keeps every page in the store for next launch.
         pool.closeAll()
         PCEFRuntime.quitAfterBrowsersClose()
@@ -376,7 +381,10 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         store.noteCoOpen(seconds: dwellInterval)
         loyaltyTick()
         guard let id = keyWindowID, let window = store.window(id) else { return }
-        for page in window.visiblePageIDs { store.recordDwell(page, seconds: dwellInterval) }
+        for page in window.visiblePageIDs {
+            store.recordDwell(page, seconds: dwellInterval)
+            indexForMeaningIfNeeded(page)
+        }
     }
 
     // MARK: Bar and sidebar actions
@@ -390,7 +398,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     // MARK: Menu actions
 
     private func withSelectedPage(_ body: (PageID) -> Void) {
-        guard let id = keyWindowID, let page = store.window(id)?.selectedPageID else { return }
+        // A mini window in front has no page in the store; never reach through to a main window behind it.
+        guard keyMiniWindow == nil, let id = keyWindowID, let page = store.window(id)?.selectedPageID else { return }
         body(page)
     }
 
@@ -408,6 +417,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @objc func menuShelf(_ sender: Any?) { keyController?.toggleShelf() }
     @objc func menuFind(_ sender: Any?) { keyController?.openFind() }
     @objc func menuClosePage(_ sender: Any?) {
+        if let mini = keyMiniWindow { mini.window.performClose(nil); return }
         guard let id = keyWindowID, let controller = controllers[id] else { NSApp.keyWindow?.performClose(nil); return }
         if controller.dismissPanel() { return }
         if let page = store.window(id)?.selectedPageID, store.window(id)?.page(page) != nil {
@@ -416,14 +426,26 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             controller.window.performClose(nil)
         }
     }
-    @objc func menuCloseWindow(_ sender: Any?) { keyController?.window.performClose(nil) }
+    @objc func menuCloseWindow(_ sender: Any?) {
+        if let mini = keyMiniWindow { mini.window.performClose(nil); return }
+        keyController?.window.performClose(nil)
+    }
     @objc func menuReopen(_ sender: Any?) { if let id = keyWindowID { store.reopenClosedPage(in: id) } }
     @objc func menuNextPage(_ sender: Any?) { if let id = keyWindowID { store.selectAdjacent(offset: 1, in: id) } }
     @objc func menuPreviousPage(_ sender: Any?) { if let id = keyWindowID { store.selectAdjacent(offset: -1, in: id) } }
     @objc func menuSelectNumbered(_ sender: NSMenuItem) { if let id = keyWindowID { store.selectByShortcut(sender.tag, in: id) } }
-    @objc func menuReload(_ sender: Any?) { withSelectedPage { pool.reload($0) } }
-    @objc func menuBack(_ sender: Any?) { withSelectedPage { pool.goBack($0) } }
-    @objc func menuForward(_ sender: Any?) { withSelectedPage { pool.goForward($0) } }
+    @objc func menuReload(_ sender: Any?) {
+        if let mini = keyMiniWindow { mini.browser?.reload(); return }
+        withSelectedPage { pool.reload($0) }
+    }
+    @objc func menuBack(_ sender: Any?) {
+        if let mini = keyMiniWindow { mini.browser?.goBack(); return }
+        withSelectedPage { pool.goBack($0) }
+    }
+    @objc func menuForward(_ sender: Any?) {
+        if let mini = keyMiniWindow { mini.browser?.goForward(); return }
+        withSelectedPage { pool.goForward($0) }
+    }
     @objc func menuZoomIn(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: 0.5) } }
     @objc func menuZoomOut(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: -0.5) } }
     @objc func menuZoomReset(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: 0) } }
@@ -459,6 +481,8 @@ extension ChromiumApp: NSMenuItemValidation {
         switch item.action {
         case #selector(menuUseDock(_:)): item.state = prefs.value.tabLayout == .dock ? .on : .off
         case #selector(menuUseSidebar(_:)): item.state = prefs.value.tabLayout == .sidebar ? .on : .off
+        case #selector(menuToggleAI(_:)): item.state = ai.isEnabled ? .on : .off
+        case #selector(menuPromoteMini(_:)): return keyMiniWindow != nil
         default: break
         }
         return true

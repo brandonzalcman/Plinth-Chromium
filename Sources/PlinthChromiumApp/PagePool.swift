@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 import PlinthCEF
 import PlinthModel
+import PlinthReader
 import PlinthSidebar
 
 /// One Chromium browser per open page, keyed by the store's `PageID`. The CEF counterpart of the
@@ -41,19 +42,49 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
 
     func existing(_ id: PageID) -> PCEFBrowser? { browsers[id] }
 
+    /// A browser made outside the pool (a mini window's) that the next page opened with its address
+    /// takes over, instead of starting a new one. See `offerForAdoption(_:url:)`.
+    private var adoption = AdoptionSlot<PCEFBrowser>()
+
     @discardableResult
     func browser(for page: Page) -> PCEFBrowser {
         if let b = browsers[page.id] { return b }
+        if let adopted = adoption.take(matching: page.url) {
+            adopt(adopted, as: page)
+            return adopted
+        }
         let b = PCEFBrowser(url: page.url.absoluteString, profile: profileForPage(page.id), delegate: self)
-        browsers[page.id] = b
-        ids[ObjectIdentifier(b)] = page.id
+        register(b, as: page.id)
+        return b
+    }
+
+    private func register(_ b: PCEFBrowser, as id: PageID) {
+        browsers[id] = b
+        ids[ObjectIdentifier(b)] = id
         // CEF makes the page's window during init, before the page was registered here.
         // (Next turn of the run loop: the caller is usually laying out pages right now.)
         if b.hostWindow != nil {
-            let id = page.id
             DispatchQueue.main.async { [weak self] in self?.callbacks.hostReady(id) }
         }
-        return b
+    }
+
+    /// The next page opened with `url` keeps `browser` (and its history, scroll and form state)
+    /// rather than loading again. Call `endAdoption()` right after opening that page.
+    func offerForAdoption(_ browser: PCEFBrowser, url: URL) {
+        adoption.offer(browser, url: url)?.close()
+    }
+
+    /// Ends an offer nobody took (the store chose an existing page, say): that browser is closed.
+    func endAdoption() {
+        adoption.clear()?.close()
+    }
+
+    private func adopt(_ b: PCEFBrowser, as page: Page) {
+        b.delegate = self
+        register(b, as: page.id)
+        // The page may have moved on since its address was handed over; the store hears what it shows now.
+        callbacks.didUpdate(page.id, URL(string: b.address), b.title.isEmpty ? nil : b.title)
+        callbacks.loadingChanged(page.id)
     }
 
     func load(_ url: URL, in id: PageID) { browsers[id]?.loadURL(url.absoluteString) }
@@ -87,6 +118,37 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
     func zoom(_ page: PageID, by step: Double) {
         guard let b = browsers[page] else { return }
         b.zoomLevel = step == 0 ? 0 : min(max(b.zoomLevel + step, -5), 9)
+    }
+
+    // MARK: Page text
+
+    /// The page's readable text (article or main content, chrome dropped, whitespace collapsed, at
+    /// most `limit` characters), the text around where the reader is and how far down they are: the
+    /// shared reader script, run in the page by Plinth's renderer helper. If the script gives
+    /// nothing back, Chromium's plain text of the page stands in (no focus excerpt or scroll
+    /// position). nil for a page with no live browser, one that isn't http, https or file, or one
+    /// that moved on while it was being read.
+    func readableText(for id: PageID, limit: Int = 20_000) async -> PageText? {
+        guard let b = browsers[id] else { return nil }
+        return await Self.readableText(of: b, limit: limit)
+    }
+
+    /// The same for any browser, a mini window's included.
+    static func readableText(of b: PCEFBrowser, limit: Int = 20_000) async -> PageText? {
+        let address = b.address
+        guard b.isCreated, let url = URL(string: address), ReaderScript.schemes.contains(url.scheme?.lowercased() ?? "") else {
+            return nil
+        }
+        let raw = await withCheckedContinuation { (done: CheckedContinuation<Any?, Never>) in
+            b.evaluateJavaScript(PageTextScript.expression(limit: limit)) { done.resume(returning: $0) }
+        }
+        guard b.address == address else { return nil }
+        if let text = ReaderScript.pageText(from: raw, pageURL: url, fallbackTitle: b.title, limit: limit) { return text }
+        let plain = await withCheckedContinuation { (done: CheckedContinuation<String?, Never>) in
+            b.readPlainText { done.resume(returning: $0) }
+        }
+        guard b.address == address else { return nil }
+        return PageTextScript.plainText(plain, pageURL: url, title: b.title, limit: limit)
     }
 
     // MARK: PCEFBrowserDelegate

@@ -89,9 +89,14 @@ each, dropped when the window closes.
   dock's downloads button, the sidebar and the shared downloads tray); Chromium's download bubble is off.
 - Not ported yet from the Mac app: iCloud sync (needs the signed Xcode target and entitlements),
   bookmarks UI, a history panel (Chromium's `chrome://history` is used), passwords (Chromium's built-in manager runs instead; Plinth's
-  Apple Passwords import/export isn't wired in), Points & Levels, Ask / on-device AI summaries,
-  the welcome guide, peek and mini windows, split-view divider dragging, page snapshots on the shelf,
+  Apple Passwords import/export isn't wired in), Points & Levels, Ask,
+  the welcome guide, peek, split-view divider dragging, page snapshots on the shelf,
   content blocking (use an extension for now), and drag-and-drop between windows.
 - **No Chromium sandbox** (`no_sandbox`), no hardened runtime, no notarization, no Sparkle yet.
-- On-device AI: Foundation Models is available to this app the same way as to the Mac app
-  (`PlinthAI` is in `PlinthCore`); it isn't wired to a page-text source yet.
+- On-device AI (Foundation Models, as on the Mac) drives semantic history and the resume card's summary.
+  Page text comes from the shared reader script, evaluated in the page's main frame by Plinth's renderer
+  helper (`-[PCEFBrowser evaluateJavaScript:completion:]`, a process message to `PlinthChromiumHelper`),
+  with Chromium's plain text as a fallback. Unlike WebKit's isolated content world, it runs in the page's
+  own JavaScript world, so a page that rewrites built-ins can affect what is read.
+- The resume card floats in a small child window of its own, above the pages and below the overlay, so its
+  × button gets clicks while the rest of the page still does.

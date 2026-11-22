@@ -312,6 +312,7 @@ struct PanelLayer: View {
                         }
                         return app.store.suggestions(for: query, limit: 7)
                     },
+                    semanticResults: { query in await app.semanticResults(for: query) },
                     icon: { app.pool.favicons.image(for: $0) },
                     onSubmit: { controller.submit($0) },
                     onDismiss: { controller.dismissPanel() }
@@ -329,11 +330,15 @@ struct PanelLayer: View {
                     icon: { app.pool.favicons.image(for: $0) },
                     snapshot: { _ in nil },
                     onRestore: { entry, page in
-                        app.store.restore(entry: entry, page: page, into: controller.windowID)
+                        let ids = app.store.restore(entry: entry, page: page, into: controller.windowID)
                         controller.dismissPanel()
+                        controller.refreshContent()
+                        controller.showResumeCard(forRestored: ids)
                     },
                     onRemove: { entry, page in app.store.removeFromShelf(entry: entry, page: page) },
                     onDismiss: { controller.dismissPanel() },
+                    semanticResults: { query in await app.semanticResults(for: query) },
+                    onOpenResult: { controller.submit(.result($0)) },
                     onClearAll: { app.store.clearShelf() }
                 )
                 .offset(x: centreX - size.width / 2)

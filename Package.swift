@@ -45,11 +45,15 @@ let package = Package(
         .target(name: "PlinthSidebar", dependencies: [.product(name: "PlinthCore", package: "Plinth")]),
         // Chrome extensions found in a profile folder, and their toolbar popups.
         .target(name: "PlinthExtensions"),
+        // Bookmark, history and password import from the other browsers on the Mac (Safari, the Chromium
+        // family, the Firefox family) and from password CSV exports. Ported from the Plinth package's
+        // PlinthImport, which is not in the PlinthCore product.
+        .target(name: "PlinthBrowserImport", dependencies: [.product(name: "PlinthCore", package: "Plinth")]),
         // The app shell: the shared store and bar, driving CEF.
         .target(
             name: "PlinthChromiumApp",
             dependencies: [
-                "PlinthCEF", "PlinthSidebar", "PlinthExtensions",
+                "PlinthCEF", "PlinthSidebar", "PlinthExtensions", "PlinthBrowserImport",
                 .product(name: "PlinthCore", package: "Plinth"),
                 .product(name: "PlinthMacUI", package: "Plinth"),
             ],
@@ -59,6 +63,7 @@ let package = Package(
 
         .testTarget(name: "PlinthSidebarTests", dependencies: ["PlinthSidebar", .product(name: "PlinthCore", package: "Plinth"), .product(name: "PlinthMacUI", package: "Plinth")]),
         .testTarget(name: "PlinthExtensionsTests", dependencies: ["PlinthExtensions"]),
+        .testTarget(name: "PlinthBrowserImportTests", dependencies: ["PlinthBrowserImport", .product(name: "PlinthCore", package: "Plinth")]),
         .testTarget(name: "PlinthChromiumAppTests", dependencies: ["PlinthChromiumApp", .product(name: "PlinthCore", package: "Plinth")]),
     ],
     cxxLanguageStandard: .cxx20

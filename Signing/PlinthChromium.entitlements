@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	The iCloud (CloudKit) entitlements for Plinth Chromium. Scripts/bundle.sh fills in TEAM_ID from the
+	provisioning profile given with the profile option and signs the app with the result; the ad-hoc build carries
+	none of this (iCloud then says it needs a signed build). The container is the Mac app's, so both
+	share pins, the shelf, history and open pages. See docs/icloud-sync.md.
+	-->
+	<key>com.apple.application-identifier</key>
+	<string>TEAM_ID.dev.getplinth.chromium</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>TEAM_ID</string>
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.dev.getplinth.Plinth</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+</dict>
+</plist>

@@ -3,10 +3,9 @@ import AppKit
 import PlinthPanels
 
 /// The sections, in sidebar order. The raw value is the stable id used by `select(section:)`.
-/// The Mac app's Passwords, Downloads and Import sections are left out:
-/// those features aren't in the Chromium build yet.
+/// The Mac app's Downloads section is left out: Chromium's downloads are set up differently here.
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, startup, appearance, loyalty, privacy, ai, extensions, about
+    case general, startup, appearance, loyalty, privacy, passwords, sync, ai, extensions, `import`, about
     var id: String { rawValue }
 
     var title: String {
@@ -16,8 +15,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: "Appearance"
         case .loyalty: "Points & Levels"
         case .privacy: "Privacy & Security"
+        case .passwords: "Passwords"
+        case .sync: "iCloud"
         case .ai: "On-device AI"
         case .extensions: "Extensions"
+        case .import: "Import"
         case .about: "About"
         }
     }
@@ -29,8 +31,11 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: "paintbrush"
         case .loyalty: "rosette"
         case .privacy: "hand.raised"
+        case .passwords: "key"
+        case .sync: "icloud"
         case .ai: "sparkles"
         case .extensions: "puzzlepiece.extension"
+        case .import: "square.and.arrow.down"
         case .about: "info.circle"
         }
     }
@@ -70,8 +75,11 @@ struct SettingsRoot: View {
         case .appearance: AppearanceSettingsView(app: app)
         case .loyalty: LoyaltySettingsView(app: app)
         case .privacy: PrivacySettingsView(app: app)
+        case .passwords: PasswordsSettingsView(app: app)
+        case .sync: SyncSettingsView(app: app)
         case .ai: AISettingsView(app: app)
         case .extensions: ExtensionsSettingsView(app: app)
+        case .import: ImportSettingsView(app: app)
         case .about: AboutSettingsView()
         }
     }

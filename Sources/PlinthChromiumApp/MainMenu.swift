@@ -11,6 +11,7 @@ enum MainMenu {
         appMenu.addItem(.separator())
         add(appMenu, "Settings…", #selector(ChromiumApp.menuSettings(_:)), ",", target: app)
         add(appMenu, "Use On-Device AI", #selector(ChromiumApp.menuToggleAI(_:)), "", target: app)
+        add(appMenu, "iCloud Sync", #selector(ChromiumApp.menuToggleSync(_:)), "", target: app)
         appMenu.addItem(.separator())
         add(appMenu, "Hide Plinth", #selector(NSApplication.hide(_:)), "h", target: NSApp)
         add(appMenu, "Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option], target: NSApp)
@@ -29,6 +30,10 @@ enum MainMenu {
         add(file, "Reopen Closed Page", #selector(ChromiumApp.menuReopen(_:)), "t", [.command, .shift], target: app)
         file.addItem(.separator())
         add(file, "Move to Main Window", #selector(ChromiumApp.menuPromoteMini(_:)), "\r", [.command, .shift], target: app)
+        let remote = NSMenuItem(title: RemotePagesMenu.title, action: nil, keyEquivalent: "")
+        remote.submenu = NSMenu(title: RemotePagesMenu.title)
+        remote.submenu?.delegate = app.remotePagesMenu
+        file.addItem(remote)
 
         // Edit items go to the first responder: the page, or a Plinth text field.
         let edit = submenu(main, "Edit")
@@ -73,6 +78,10 @@ enum MainMenu {
             let item = add(go, "Page \(number)", #selector(ChromiumApp.menuSelectNumbered(_:)), "\(number)", target: app)
             item.tag = number
         }
+
+        let bookmarks = submenu(main, "Bookmarks")
+        add(bookmarks, "Bookmark This Page", #selector(ChromiumApp.menuBookmarkPage(_:)), "d", target: app)
+        add(bookmarks, "Show Bookmarks", #selector(ChromiumApp.menuShowBookmarks(_:)), "b", [.command, .option], target: app)
 
         let site = submenu(main, "Site")
         add(site, "Keep on Bar", #selector(ChromiumApp.menuKeepSite(_:)), "k", [.command, .shift], target: app)

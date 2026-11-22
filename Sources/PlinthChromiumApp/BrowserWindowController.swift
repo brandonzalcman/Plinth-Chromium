@@ -16,6 +16,12 @@ final class WindowChrome {
         case shelf
         case downloads
         case find
+        /// Plinth's own history (⌘Y, see History.swift).
+        case history
+        /// Bookmarks and their folders (⌥⌘B, see Bookmarks.swift).
+        case bookmarks
+        /// The card shown after ⌘D (see Bookmarks.swift).
+        case bookmark(id: UUID, isNew: Bool)
     }
 
     var panel: Panel = .none
@@ -317,7 +323,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
     var hasNoPanel: Bool { chrome.panel == .none }
 
-    private func showPanel(_ panel: WindowChrome.Panel) {
+    func showPanel(_ panel: WindowChrome.Panel) {
         if chrome.flyoutOpen { chrome.flyoutOpen = false }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) { chrome.panel = panel }
         syncOverlay()

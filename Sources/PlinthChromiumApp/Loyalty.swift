@@ -38,11 +38,12 @@ struct LoyaltySnapshot: Equatable {
     var hasPins = false
     /// An ordinary (not private) window has a split view on.
     var hasSplitInOrdinaryWindow = false
+    var hasBookmarks = false
+    var syncIsOn = false
 }
 
 /// Maps the app's state to the loyalty events it earns, as the Mac app does. The Chromium build has
-/// no bookmarks, no Ask and no iCloud sync yet, so the first-bookmark, first-Ask and sync milestones
-/// cannot be reached here.
+/// no Ask yet, so the first-Ask milestone cannot be reached here.
 enum LoyaltyEarning {
     /// The events for one tick (at launch, on activation and every few seconds while Plinth is active).
     /// Repeats are free: the engine pays a day once and a milestone once.
@@ -51,6 +52,8 @@ enum LoyaltyEarning {
         if !s.keyWindowIsPrivate { events.append(.dayOfUse) }
         if s.hasPins { events.append(.milestone(.firstPin)) }
         if s.hasSplitInOrdinaryWindow { events.append(.milestone(.firstSplitView)) }
+        if s.hasBookmarks { events.append(.milestone(.firstBookmark)) }
+        if s.syncIsOn { events.append(.milestone(.syncOn)) }
         return events
     }
 
@@ -61,7 +64,8 @@ enum LoyaltyEarning {
 }
 
 /// Points and levels for this app: the engine, the model views observe, and the share sheet.
-/// The ledger is `loyalty.json` in the app's storage directory, as on the Mac. There is no sync.
+/// The ledger is `loyalty.json` in the app's storage directory, as on the Mac, and syncs with iCloud sync
+/// (see Sync.swift).
 @MainActor final class LoyaltyController {
     let engine: LoyaltyEngine
     let model = LoyaltyModel()
@@ -99,6 +103,7 @@ extension ChromiumApp {
         engine.onChange = { [weak self] in
             guard let self else { return }
             self.loyalty.model.bump()
+            self.pushLoyaltyToSync()
             self.applyAppIcon()
             self.announceLevelUpIfPossible()
         }
@@ -133,7 +138,9 @@ extension ChromiumApp {
         let snapshot = LoyaltySnapshot(
             keyWindowIsPrivate: keyWindowID.map { store.isPrivate(window: $0) } ?? false,
             hasPins: !store.pins.isEmpty,
-            hasSplitInOrdinaryWindow: store.windows.contains { !$0.isPrivate && $0.split != nil })
+            hasSplitInOrdinaryWindow: store.windows.contains { !$0.isPrivate && $0.split != nil },
+            hasBookmarks: !(bookmarks?.bookmarks.isEmpty ?? true),
+            syncIsOn: sync != nil)
         for event in LoyaltyEarning.tickEvents(snapshot) { earn(event) }
         announceLevelUpIfPossible()   // a level reached before Plinth was active waits for the next tick
     }

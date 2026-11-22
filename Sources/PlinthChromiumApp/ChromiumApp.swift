@@ -11,6 +11,7 @@ import PlinthRules
 import PlinthSettings
 import PlinthSidebar
 import PlinthStore
+import PlinthSync
 
 /// Owns the store, the page pool and the windows, and connects them. One per process.
 /// The Chromium counterpart of the Mac app's `AppController`: same store, same rules, same actions.
@@ -26,6 +27,20 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored private(set) var settings: SettingsStore!
     @ObservationIgnored private(set) var prefs: ShellPreferencesStore!
     @ObservationIgnored private(set) var store: BrowserStore!
+    /// Bookmarks and their folders (see Bookmarks.swift).
+    @ObservationIgnored private(set) var bookmarks: BookmarkStore!
+    /// Plinth's own password manager (see Passwords/PasswordsController.swift).
+    @ObservationIgnored var passwords: PasswordsController!
+    /// iCloud sync, while it is on (see Sync.swift).
+    @ObservationIgnored var sync: SyncCoordinator?
+    /// The in-memory server a scratch profile syncs with (`PLINTH_SYNC=memory`), for checking the wiring.
+    @ObservationIgnored var memorySyncTransport: InMemoryTransport?
+    /// Open pages on the user's other devices, from the last sync.
+    var otherDevices: [DeviceOpenPages] = []
+    /// A scratch profile's sync switch, never saved (PLINTH_SYNC=memory starts it on).
+    @ObservationIgnored var scratchSyncSwitch = ProcessInfo.processInfo.environment["PLINTH_SYNC"] == "memory"
+    /// Fills "Pages on Other Devices" when it opens.
+    @ObservationIgnored lazy var remotePagesMenu = RemotePagesMenu(app: self)
     @ObservationIgnored private(set) var pool: PagePool!
     @ObservationIgnored private(set) var extensions: ExtensionsController!
     @ObservationIgnored private(set) var downloads: DownloadsModel!
@@ -65,6 +80,9 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         if let paths = env["PLINTH_LOAD_EXTENSION"] {
             PCEFRuntime.unpackedExtensions = paths.split(separator: ",").map(String.init)
         }
+        // Plinth's password script runs in every page from the start (see ChromiumPasswordScript.swift).
+        PCEFRuntime.passwordScript = ChromiumPasswordScript.source
+        PCEFRuntime.passwordScriptTestMode = env["PLINTH_STORAGE"] != nil && env["PLINTH_STEPS"] != nil
         let cefRoot = support.appendingPathComponent("Chromium", isDirectory: true).path
         // Plinth keeps its own session (state.json). Chromium's would reopen its windows behind Plinth's.
         try? FileManager.default.removeItem(atPath: cefRoot + "/Default/Sessions")
@@ -118,6 +136,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         accentChoice = settings.value.accent
         store = BrowserStore(identity: identity, namer: PageNamer(), fader: Self.fader(for: settings.value.fadeBehavior),
                              storageDirectory: storageDirectory)
+        bookmarks = BookmarkStore(storageDirectory: storageDirectory)
         pool = PagePool(siteKey: { [identity] in identity.key(for: $0) })
         pool.favicons.cacheDirectory = storageDirectory.appendingPathComponent("Favicons", isDirectory: true)
         extensions = ExtensionsController(app: self, profileDirectory: chromiumProfileDirectory)
@@ -138,6 +157,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             PCEFRuntime.downloadsDirectory = folder
         }
         connect()
+        setUpPasswords()
         setUpLoyalty()
         setUpAI()
         settings.observe { [weak self] old, new in self?.settingsDidChange(from: old, to: new) }
@@ -160,6 +180,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.recordDwell() }
         }
         didFinishLaunching = true
+        startSyncIfConfigured()
         let early = pendingOpenURLs
         pendingOpenURLs = []
         for url in early { openFromOtherApp(url) }
@@ -228,6 +249,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         PCEFRuntime.log("terminate: \(pool.allBrowsers.count) pages open")
         for c in controllers.values { c.saveFrame() }
         store.flush()
+        bookmarks.flush()
         ShareCard.removeLeftovers()
         extensions.closePopup()
         flushAI()
@@ -283,10 +305,13 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             if let window = self?.windowShowing(id) { self?.lastMainWindowID = window }
         }
         pool.callbacks.keyEquivalent = { event in NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false }
+        pool.callbacks.passwordMessage = { [weak self] page, browser, message in
+            self?.passwords.handle(message, from: page, browser: browser)
+        }
     }
 
     /// The window whose bar shows this page right now (pins appear in every window).
-    private func windowShowing(_ page: PageID) -> WindowID? {
+    func windowShowing(_ page: PageID) -> WindowID? {
         if let id = store.windowID(containing: page) { return id }
         return controllers.first { $0.value.shown.contains(page) }?.key
     }
@@ -298,6 +323,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             if let page = store.page(id) { pool.browser(for: page) }
         case .pageClosed(let id):
             pool.close(id)
+            passwords.pageClosed(id)
         case .pagesShelved(let ids, let key):
             pool.close(ids)
             // Say where they went: pages that faded away should never just vanish.
@@ -472,7 +498,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @objc func menuManageExtensions(_ sender: Any?) { openInNewPage(URL(string: "chrome://extensions")!) }
     @objc func menuGetExtensions(_ sender: Any?) { openInNewPage(URL(string: "https://chromewebstore.google.com/category/extensions")!) }
     @objc func menuDownloads(_ sender: Any?) { keyController?.toggleDownloads() }
-    @objc func menuHistory(_ sender: Any?) { openInNewPage(URL(string: "chrome://history")!) }
+    @objc func menuHistory(_ sender: Any?) { keyController?.toggleHistory() }
     @objc func menuDevTools(_ sender: Any?) { withSelectedPage { pool.existing($0)?.executeChromeCommand("IDC_DEV_TOOLS") } }
 }
 
@@ -483,6 +509,9 @@ extension ChromiumApp: NSMenuItemValidation {
         case #selector(menuUseSidebar(_:)): item.state = prefs.value.tabLayout == .sidebar ? .on : .off
         case #selector(menuToggleAI(_:)): item.state = ai.isEnabled ? .on : .off
         case #selector(menuPromoteMini(_:)): return keyMiniWindow != nil
+        case #selector(menuToggleSync(_:)): item.state = sync != nil ? .on : .off
+        case #selector(menuBookmarkPage(_:)):
+            return keyMiniWindow == nil && keyWindowID.flatMap { store.window($0)?.selectedPageID } != nil
         default: break
         }
         return true

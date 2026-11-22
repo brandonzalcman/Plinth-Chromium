@@ -66,6 +66,8 @@ struct SidebarHost: View {
                 app.prefs.update { if asList { $0.listFolders.insert(id) } else { $0.listFolders.remove(id) } }
             },
             onSettings: { app.showSettings() },
+            onBookmarks: { controller.toggleBookmarks() },
+            onHistory: { controller.toggleHistory() },
             extensions: AnyView(ExtensionsButton(app: app, controller: controller, palette: palette))
         )
         // The rail opens the full sidebar over the page while the pointer rests on it.
@@ -119,6 +121,8 @@ struct SidebarView: View {
     let onFocusGroup: (GroupID?) -> Void
     let onFolderStyle: (UUID, _ asList: Bool) -> Void
     let onSettings: () -> Void
+    let onBookmarks: () -> Void
+    let onHistory: () -> Void
     let extensions: AnyView
 
     @State private var openFolder: UUID?
@@ -791,6 +795,8 @@ struct SidebarView: View {
             // The same tray as the bar's shelf button.
             badged(shelfCount) { iconButton("tray", help: "Shelf: pages put away (⇧⌘L)") { onAction(.openShelf) } }
             downloadsButton
+            iconButton("book", help: "Bookmarks (⌥⌘B)", action: onBookmarks)
+            iconButton("clock.arrow.circlepath", help: "History (⌘Y)", action: onHistory)
             extensions
             Spacer()
             iconButton("gearshape", help: "Settings (⌘,)", action: onSettings)

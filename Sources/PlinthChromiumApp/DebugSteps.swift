@@ -12,6 +12,11 @@ import PlinthSidebar
 /// split · layout dock|sidebar · collapse · command · shelf · close · extensions · popup <n> · state ·
 /// js <script> · readtext · dwell <s> · meaning <query> · restore · card · clickcard · mini <url> · promote · promotekey ·
 /// minikey · quit
+///
+/// Bookmarks, history, import, passwords and sync (DebugFeatureSteps.swift): bookmark · bookmarks · history ·
+/// bmstate · historycount · clearhistory · import <browser> · pw add|list|answer|pending|delete|clear … ·
+/// pwimport <browser> · pwcsv <file> · pwfocus <css> · pwtype <css> <text> · pwsubmit <css> · pwvalue <css> ·
+/// sync · syncon · syncoff · syncpeer · syncnow · shot <png> · settingsat <section>
 @MainActor
 enum DebugSteps {
     static func runIfRequested(_ app: ChromiumApp) {
@@ -210,7 +215,7 @@ enum DebugSteps {
         case "quit":
             NSApp.terminate(nil)
         default:
-            log("unknown step \(command)")
+            if await !runFeature(command, arg, app) { log("unknown step \(command)") }
         }
         log("done \(command) \(arg)")
     }

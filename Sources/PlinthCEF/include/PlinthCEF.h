@@ -49,6 +49,13 @@ NS_ASSUME_NONNULL_BEGIN
 /// Unpacked extension folders to load at startup (Chromium's --load-extension), for development and tests.
 /// Set before +startWithCachePath:mockKeychain:.
 @property (class, copy) NSArray<NSString *> *unpackedExtensions;
+/// Plinth's password script (a function expression taking `post` and `testMode` and returning its fill
+/// function). Plinth's renderer helper runs it in every http(s) frame before the page's own scripts,
+/// handing it a private `post` that reaches `-browser:passwordMessage:…` and keeping the fill function to
+/// itself, so neither is ever reachable from the page. Set before the first browser is made; nil turns it off.
+@property (class, copy, nullable) NSString *passwordScript;
+/// Lets scripted events stand in for real input (scratch-profile test launches only).
+@property (class) BOOL passwordScriptTestMode;
 /// Runs until +quitMessageLoop. Returns after the last browser has closed.
 + (void)runMessageLoop;
 + (void)quitMessageLoop;
@@ -104,6 +111,11 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 - (void)browserHostWindowReady:(PCEFBrowser *)browser;
 /// The page's window became key: the user clicked into the page.
 - (void)browserDidActivate:(PCEFBrowser *)browser;
+@optional
+/// A message from the password script in one of the page's frames (see `passwordScript`). `message` can
+/// hold what was typed into a login form; it must never be logged. `frameURL` is the frame's own address.
+- (void)browser:(PCEFBrowser *)browser passwordMessage:(NSDictionary *)message frame:(NSString *)frameID
+       frameURL:(NSString *)frameURL isMainFrame:(BOOL)isMainFrame;
 @end
 
 /// One page: a Chrome-style browser in a frameless window of its own.
@@ -146,6 +158,10 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 /// thread, with nil if the page has no browser yet, the script threw, or no answer came within a
 /// few seconds (the page navigated or its renderer went away).
 - (void)evaluateJavaScript:(NSString *)expression completion:(void (^)(id _Nullable result))completion;
+/// Hands a saved login to the password script's fill function in one frame (`frameID` from
+/// `-browser:passwordMessage:…`). An empty password fills the user name alone. Fire and forget.
+- (void)fillPasswordInFrame:(NSString *)frameID token:(NSInteger)token username:(NSString *)username
+                   password:(NSString *)password;
 /// The main frame's plain text (Chromium's own text dump, no structure), or nil.
 - (void)readPlainText:(void (^)(NSString *_Nullable text))completion;
 /// Shows the page's window as a child above `parent`, filling `frame` (screen coordinates) with its

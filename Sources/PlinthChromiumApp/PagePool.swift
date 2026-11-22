@@ -23,6 +23,8 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
         var hostReady: (PageID) -> Void = { _ in }
         var activated: (PageID) -> Void = { _ in }
         var keyEquivalent: (NSEvent) -> Bool = { _ in false }
+        /// A message from the password script in one of the page's frames. It can hold what was typed: never log it.
+        var passwordMessage: (PageID, PCEFBrowser, PasswordScriptMessage) -> Void = { _, _, _ in }
     }
 
     var callbacks = Callbacks()
@@ -225,6 +227,13 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
 
     func browserDidActivate(_ browser: PCEFBrowser) {
         if let id = id(of: browser) { callbacks.activated(id) }
+    }
+
+    func browser(_ browser: PCEFBrowser, passwordMessage message: [AnyHashable: Any], frame frameID: String,
+                 frameURL: String, isMainFrame: Bool) {
+        guard let id = id(of: browser) else { return }
+        callbacks.passwordMessage(id, browser, PasswordScriptMessage(body: message, frameID: frameID, frameURL: frameURL,
+                                                                     isMainFrame: isMainFrame))
     }
 }
 

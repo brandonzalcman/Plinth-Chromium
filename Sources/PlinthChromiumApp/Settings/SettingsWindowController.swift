@@ -56,7 +56,8 @@ final class SettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    /// Shows the section with this stable id: general, startup, appearance, privacy, extensions, about.
+    /// Shows the section with this stable id: general, startup, appearance, loyalty, privacy, passwords, sync, ai,
+    /// extensions, import, about.
     func select(section id: String) {
         if let section = SettingsSection(rawValue: id) { navigation.selected = section }
     }

@@ -70,6 +70,24 @@ format); Chromium's profile is in `…/Chromium`. Chromium's own `Sessions` fold
 so it never reopens its windows behind Plinth's. Private windows get an in-memory CEF request context
 each, dropped when the window closes.
 
+## Bookmarks, history, import, passwords and iCloud
+
+Bookmarks (`BookmarkStore`, ⌘D card, ⌥⌘B panel, command-bar results) and the history panel (⌘Y) are the
+shared Plinth pieces, drawn in the overlay like the other panels. Import (`PlinthBrowserImport`, ported
+from the Plinth package's `PlinthImport`, which isn't in `PlinthCore`) reads Safari, the Chromium family
+(Chrome, Edge, Brave, Arc, Vivaldi, Opera, Chromium; every profile) and the Firefox family (Firefox, Zen;
+the profile last used), and password CSVs from any of them, Apple Passwords, 1Password or Bitwarden.
+
+Passwords are Plinth's own (`PlinthPasswords`, Keychain service `app.plinth.chromium.passwords`);
+Chromium's password manager is switched off. The Mac's page script is adapted in
+`ChromiumPasswordScript`: the renderer helper runs it in each http(s) frame when the frame's script
+context is created, gives it a private `post` (a V8 function that sends a process message) and keeps the
+fill function it returns, so neither is reachable from the page. Unlike WebKit's content world, the script
+shares the page's DOM and built-ins. Scripted popups (sign-in windows) don't get it.
+
+iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
+[icloud-sync.md](icloud-sync.md).
+
 ## Known gaps (first cut)
 
 - **Extension popups don't see an active tab.** A popup runs in its own window, so
@@ -87,9 +105,7 @@ each, dropped when the window closes.
 - **Background pages restored from the last session load only when first shown.**
 - Downloads are Plinth's own (saved to the Downloads folder or the one in Settings, shown in the
   dock's downloads button, the sidebar and the shared downloads tray); Chromium's download bubble is off.
-- Not ported yet from the Mac app: iCloud sync (needs the signed Xcode target and entitlements),
-  bookmarks UI, a history panel (Chromium's `chrome://history` is used), passwords (Chromium's built-in manager runs instead; Plinth's
-  Apple Passwords import/export isn't wired in), Points & Levels, Ask,
+- Not ported yet from the Mac app: Ask,
   the welcome guide, peek, split-view divider dragging, page snapshots on the shelf,
   content blocking (use an extension for now), and drag-and-drop between windows.
 - **No Chromium sandbox** (`no_sandbox`), no hardened runtime, no notarization, no Sparkle yet.

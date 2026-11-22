@@ -281,7 +281,7 @@ struct DockHost: View {
     }
 }
 
-/// The command bar, shelf or find strip, floating over the page.
+/// The command bar, shelf, history, bookmarks or find strip, floating over the page.
 struct PanelLayer: View {
     let app: ChromiumApp
     let controller: BrowserWindowController
@@ -310,7 +310,8 @@ struct PanelLayer: View {
                             _ = app.store.suggestions(for: "")
                             return controller.isPrivate ? [] : app.store.suggestedPages()
                         }
-                        return app.store.suggestions(for: query, limit: 7)
+                        // Bookmarks are listed under their own heading, as on the Mac.
+                        return app.bookmarks.results(for: query, amid: app.store.suggestions(for: query, limit: 7))
                     },
                     semanticResults: { query in await app.semanticResults(for: query) },
                     icon: { app.pool.favicons.image(for: $0) },
@@ -357,6 +358,30 @@ struct PanelLayer: View {
                              geometry.layout == .dock ? 120 : geometry.sidebarColumnWidth + 12)
                     .padding(.bottom, geometry.layout == .dock ? lift : 12)
                     .transition(.scale(scale: 0.96, anchor: .bottom).combined(with: .opacity))
+            }
+        case .history:
+            ZStack(alignment: .bottom) {
+                Dimmer { controller.dismissPanel() }
+                historyPanel(accent: accent)
+                    .offset(x: centreX - size.width / 2)
+                    .padding(.bottom, lift)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        case .bookmarks:
+            ZStack(alignment: .bottom) {
+                Dimmer { controller.dismissPanel() }
+                bookmarksPanel(accent: accent)
+                    .offset(x: centreX - size.width / 2)
+                    .padding(.bottom, lift)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        case .bookmark(let id, let isNew):
+            ZStack(alignment: .bottom) {
+                Dimmer { controller.dismissPanel() }
+                bookmarkCard(id: id, isNew: isNew, accent: accent)
+                    .offset(x: centreX - size.width / 2)
+                    .padding(.bottom, lift)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         case .find:
             ZStack(alignment: .bottom) {

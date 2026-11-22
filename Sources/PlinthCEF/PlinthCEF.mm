@@ -49,6 +49,9 @@ static CefRect CefRectFromScreenRect(NSRect r) {
 /// The process messages the renderer helper answers (see PlinthChromiumHelper/main.mm).
 static const char *kEvalMessage = "plinth.eval";
 static const char *kEvalResultMessage = "plinth.eval.result";
+/// The password script's messages, and the fill sent back to it.
+static const char *kPasswordMessage = "plinth.pw";
+static const char *kPasswordFillMessage = "plinth.pw.fill";
 /// How long a script's answer is waited for.
 static const int64_t kEvalTimeout = 6 * NSEC_PER_SEC;
 
@@ -234,6 +237,8 @@ static NSString *UniquePath(NSString *folder, NSString *name) {
 // MARK: - Runtime
 
 static NSArray<NSString *> *gUnpackedExtensions = @[];
+static NSString *gPasswordScript = nil;
+static BOOL gPasswordTestMode = NO;
 static void (^gStrayHandler)(NSString *) = nil;
 static void (^gDownloadHandler)(PCEFDownload *) = nil;
 static NSString *gDownloadsDirectory = nil;
@@ -341,6 +346,10 @@ CefScopedLibraryLoader *gLoader = nullptr;
     if (it != gDownloadCallbacks.end()) it->second->Cancel();
 }
 + (void)setUnpackedExtensions:(NSArray<NSString *> *)paths { gUnpackedExtensions = [paths copy] ?: @[]; }
++ (NSString *)passwordScript { return gPasswordScript; }
++ (void)setPasswordScript:(NSString *)script { gPasswordScript = [script copy]; }
++ (BOOL)passwordScriptTestMode { return gPasswordTestMode; }
++ (void)setPasswordScriptTestMode:(BOOL)on { gPasswordTestMode = on; }
 
 + (BOOL)startWithCachePath:(NSString *)cachePath mockKeychain:(BOOL)mockKeychain {
     gLoader = new CefScopedLibraryLoader();
@@ -397,10 +406,13 @@ CefScopedLibraryLoader *gLoader = nullptr;
 @end
 
 /// Profile preferences Plinth needs: Chromium's own download pop-up is off (Plinth shows downloads
-/// itself), and downloads never ask where to save.
+/// itself), downloads never ask where to save, and Chromium's own password manager is off (Plinth
+/// fills and saves logins itself, and two managers would both offer to save every sign-in).
 static void ApplyPlinthPreferences(CefRefPtr<CefRequestContext> context) {
     CefString error;
-    for (const char *name : {"download_bubble.partial_view_enabled", "download.prompt_for_download"}) {
+    for (const char *name : {"download_bubble.partial_view_enabled", "download.prompt_for_download",
+                             "credentials_enable_service", "credentials_enable_autosignin",
+                             "profile.password_manager_enabled"}) {
         CefRefPtr<CefValue> value = CefValue::Create();
         value->SetBool(false);
         if (context->CanSetPreference(name)) context->SetPreference(name, value, error);
@@ -614,10 +626,23 @@ public:
         return BlockedChromeCommands().count(commandID) == 0;
     }
 
-    // Answers from the renderer helper to -evaluateJavaScript:completion:.
-    bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefProcessId source,
+    // Answers from the renderer helper to -evaluateJavaScript:completion:, and the password script's messages.
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefProcessId source,
                                   CefRefPtr<CefProcessMessage> message) override {
-        if (source != PID_RENDERER || message->GetName().ToString() != kEvalResultMessage) return false;
+        if (source != PID_RENDERER) return false;
+        if (message->GetName().ToString() == kPasswordMessage) {
+            CefRefPtr<CefListValue> args = message->GetArgumentList();
+            PCEFBrowser *owner = owner_;
+            id<PCEFBrowserDelegate> delegate = owner.delegate;
+            if (!frame || args->GetSize() < 1 || args->GetType(0) != VTYPE_DICTIONARY ||
+                ![delegate respondsToSelector:@selector(browser:passwordMessage:frame:frameURL:isMainFrame:)]) return true;
+            id body = NSObjectFromCefValue(args->GetValue(0), 0);
+            if (![body isKindOfClass:NSDictionary.class]) return true;
+            [delegate browser:owner passwordMessage:body frame:NSStringFromCef(frame->GetIdentifier())
+                     frameURL:NSStringFromCef(frame->GetURL()) isMainFrame:frame->IsMain()];
+            return true;
+        }
+        if (message->GetName().ToString() != kEvalResultMessage) return false;
         CefRefPtr<CefListValue> args = message->GetArgumentList();
         if (args->GetSize() < 3) return true;
         int requestID = args->GetInt(0);
@@ -760,7 +785,14 @@ static int gNextEvaluationID = 1;
         _title = @"";
         _client = new BrowserClient(self);
         CefBrowserSettings settings;
-        _browserView = CefBrowserView::CreateBrowserView(_client, CefFromNSString(url), settings, nullptr,
+        // The renderer helper reads the password script from here (OnBrowserCreated's extra_info).
+        CefRefPtr<CefDictionaryValue> extra = nullptr;
+        if (gPasswordScript.length) {
+            extra = CefDictionaryValue::Create();
+            extra->SetString("plinth.passwords", CefFromNSString(gPasswordScript));
+            extra->SetBool("plinth.passwords.test", gPasswordTestMode);
+        }
+        _browserView = CefBrowserView::CreateBrowserView(_client, CefFromNSString(url), settings, extra,
                                                          profile->_context, new BrowserViewDelegate(self));
         CefWindow::CreateTopLevelWindow(new HostWindowDelegate(self, _browserView));
     }
@@ -899,6 +931,19 @@ static int gNextEvaluationID = 1;
     NSDictionary<NSNumber *, void (^)(id)> *pending = [_evaluations copy];
     [_evaluations removeAllObjects];
     for (NSNumber *key in pending) pending[key](nil);
+}
+
+- (void)fillPasswordInFrame:(NSString *)frameID token:(NSInteger)token username:(NSString *)username
+                   password:(NSString *)password {
+    if (!_browser || _closed) return;
+    CefRefPtr<CefFrame> frame = _browser->GetFrameByIdentifier(CefFromNSString(frameID));
+    if (!frame) return;
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kPasswordFillMessage);
+    CefRefPtr<CefListValue> args = message->GetArgumentList();
+    args->SetInt(0, (int)token);
+    args->SetString(1, CefFromNSString(username));
+    args->SetString(2, CefFromNSString(password));
+    frame->SendProcessMessage(PID_RENDERER, message);
 }
 
 - (void)readPlainText:(void (^)(NSString *))completion {

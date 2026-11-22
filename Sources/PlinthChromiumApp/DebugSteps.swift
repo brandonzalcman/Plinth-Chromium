@@ -122,6 +122,12 @@ enum DebugSteps {
                                                                 siteNames: [sites[0].name, sites[1].name]))
                 log("group \(store.group(id)?.name ?? "-")")
             }
+        case "popupjs":
+            app.extensions.runInPopup(arg)
+        case "windows":
+            for w in NSApp.windows where w.isVisible {
+                log("window \(type(of: w)) id=\(w.identifier?.rawValue ?? "-") \(NSStringFromRect(w.frame)) child=\(w.parent != nil)")
+            }
         case "settings":
             app.showSettings()
         case "readtext":

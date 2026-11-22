@@ -126,6 +126,7 @@ struct SidebarView: View {
     @State private var hovered: String?
     @State private var dropTarget: SiteID?
     @State private var splitTarget: PageID?
+    @State private var pinDropTarget: SiteID?
     @Namespace private var selection
 
     /// Room for the traffic lights at the top left.
@@ -334,27 +335,30 @@ struct SidebarView: View {
         let colour = tint(pin.key)
         let key = "pin\(pin.id.raw)"
         let isHovered = hovered == key
-        return Button { onAction(.selectPin(pin.id)) } label: {
-            SiteIconView(key: pin.key, name: pin.name, image: icon(pin.key), size: 20)
-                .frame(maxWidth: .infinity, minHeight: 42)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(colour.opacity(pin.isCurrent ? 0.32 : (isHovered ? 0.24 : 0.14))))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(pin.isCurrent ? colour.opacity(0.85) : .clear, lineWidth: 1.5))
-                .shadow(color: .black.opacity(pin.isCurrent || isHovered ? 0.18 : 0), radius: 4, y: 2)
-                .offset(y: isHovered ? -1.5 : 0)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle(scale: 0.92))
+        // A plain view rather than a Button: on macOS a button keeps the mouse, so it could never be dragged.
+        return SiteIconView(key: pin.key, name: pin.name, image: icon(pin.key), size: 20)
+            .frame(maxWidth: .infinity, minHeight: 42)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(colour.opacity(pin.isCurrent ? 0.32 : (isHovered ? 0.24 : 0.14))))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(pin.isCurrent ? colour.opacity(0.85) : (pinDropTarget == pin.id ? accent : .clear),
+                              lineWidth: pinDropTarget == pin.id ? 2 : 1.5))
+            .shadow(color: .black.opacity(pin.isCurrent || isHovered ? 0.18 : 0), radius: 4, y: 2)
+            .offset(y: isHovered ? -1.5 : 0)
+            .scaleEffect(pinDropTarget == pin.id ? 1.06 : 1)
+            .contentShape(Rectangle())
+            .onTapGesture { onAction(.selectPin(pin.id)) }
         .help(pin.name + (pin.shortcut.map { "  ⌘\($0)" } ?? ""))
         .onHover { hovered = $0 ? key : (hovered == key ? nil : hovered) }
         .draggable(PinDragItem(id: pin.id.raw.uuidString))
+        // Drop another pin on this one to make a folder of the two.
         .dropDestination(for: PinDragItem.self) { items, _ in
+            pinDropTarget = nil
             guard let dragged = items.first.flatMap({ UUID(uuidString: $0.id) }).map({ SiteID($0) }),
                   dragged != pin.id else { return false }
             onAction(.groupPins(dragged, onto: pin.id))
             return true
-        }
+        } isTargeted: { pinDropTarget = $0 ? pin.id : (pinDropTarget == pin.id ? nil : pinDropTarget) }
         .contextMenu { pinMenu(pin) }
     }
 

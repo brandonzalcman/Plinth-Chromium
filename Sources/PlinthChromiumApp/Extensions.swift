@@ -74,6 +74,9 @@ final class ExtensionsController: NSObject, PCEFBrowserDelegate {
 
     var popupTitle: String? { popup?.title }
 
+    /// Runs a script in the open extension popup (debug steps).
+    func runInPopup(_ script: String) { popup?.executeJavaScript(script) }
+
     // MARK: PCEFBrowserDelegate
 
     func browserHostWindowReady(_ browser: PCEFBrowser) {

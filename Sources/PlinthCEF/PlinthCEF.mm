@@ -82,6 +82,18 @@ static void PLog(NSString *message) {
     if (getenv("PLINTH_CEF_LOG")) fprintf(stderr, "[cef] %s\n", message.UTF8String);
 }
 
+/// The Plinth window in front: the main window (or the one owning the key window), else the
+/// frontmost visible Plinth window, even while Plinth itself is in the background.
+static NSWindow *FrontPlinthWindow(void) {
+    NSWindow *front = NSApp.mainWindow ?: NSApp.keyWindow;
+    while (front.parentWindow) front = front.parentWindow;
+    if ([front.identifier isEqualToString:@"plinth.main"]) return front;
+    for (NSWindow *w in NSApp.orderedWindows) {
+        if (w.isVisible && [w.identifier isEqualToString:@"plinth.main"]) return w;
+    }
+    return nil;
+}
+
 /// The size a page asked for in window.open(…, "width=…,height=…"), for the popup about to be made.
 static CefSize gNextPopupSize(0, 0);
 
@@ -90,8 +102,7 @@ static CefSize gNextPopupSize(0, 0);
 static void FloatOverPlinth(CefRefPtr<CefWindow> window, CefSize size) {
     id handle = (__bridge id)window->GetWindowHandle();
     NSWindow *ns = [handle isKindOfClass:NSWindow.class] ? handle : [(NSView *)handle window];
-    NSWindow *front = NSApp.mainWindow ?: NSApp.keyWindow;
-    while (front.parentWindow) front = front.parentWindow;
+    NSWindow *front = FrontPlinthWindow();
     int w = size.width > 200 ? std::min(size.width, 1000) : 520;
     int h = size.height > 200 ? std::min(size.height, 900) : 680;
     if (front) {
@@ -108,7 +119,23 @@ static void FloatOverPlinth(CefRefPtr<CefWindow> window, CefSize size) {
     [ns makeKeyAndOrderFront:nil];
 }
 
+/// Centres a window over the Plinth window in front and makes it a child, so it floats above it and
+/// moves with it. Big windows (a whole Chromium tab window) are kept to a comfortable sheet size.
+static void FloatWindowOverPlinth(NSWindow *ns, NSSize size) {
+    NSWindow *front = FrontPlinthWindow();
+    if (!front || front == ns) { [ns makeKeyAndOrderFront:nil]; return; }
+    NSRect f = front.frame;
+    CGFloat w = MIN(MAX(size.width, 420), MIN(1000, f.size.width - 80));
+    CGFloat h = MIN(MAX(size.height, 480), MIN(900, f.size.height - 80));
+    [ns setFrame:NSMakeRect(NSMidX(f) - w / 2, NSMidY(f) - h / 2 + 20, w, h) display:YES];
+    ns.identifier = @"plinth.floating-popup";
+    if (ns.parentWindow != front) [front addChildWindow:ns ordered:NSWindowAbove];
+    [ns makeKeyAndOrderFront:nil];
+}
+
 static int gLiveBrowsers = 0;
+/// When Chromium started, to tell its own session restore apart from windows opened later.
+static CFAbsoluteTime gLaunchTime = 0;
 static bool gQuitWhenClosed = false;
 
 /// Ends the run loop. CefQuitMessageLoop alone does not always return from CefRunMessageLoop with the
@@ -223,25 +250,34 @@ public:
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
-        // A popup an extension or page opened (a sign-in window, say) stays, floating over Plinth.
-        if (browser->IsPopup()) {
-            PLog(@"floating a popup window Chromium opened");
-            CefRefPtr<CefBrowserView> view = CefBrowserView::GetForBrowser(browser);
-            if (view && view->GetWindow()) FloatOverPlinth(view->GetWindow(), CefSize(0, 0));
+        // Right after launch, a browser Chromium opens by itself is a leftover from its own session
+        // (after a crash, say): Plinth has its own session, so it goes, and its address opens as a page.
+        if (CFAbsoluteTimeGetCurrent() - gLaunchTime < 5) {
+            PLog(@"closing a browser Chromium restored by itself");
+            CefRefPtr<CefBrowser> keep = browser;
+            CefPostDelayedTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> b) {
+                std::string url = b->GetMainFrame()->GetURL().ToString();
+                NSString *address = [NSString stringWithUTF8String:url.c_str()];
+                if (gStrayHandler && address.length && ![address hasPrefix:@"chrome://newtab"] &&
+                    ![address isEqualToString:@"about:blank"]) {
+                    gStrayHandler(address);
+                }
+                b->GetHost()->CloseBrowser(true);
+            }, keep), 300);
             return;
         }
-        PLog(@"closing a browser Chromium opened by itself");
+        // Later, it is something an extension or page asked for: a sign-in window, a login tab
+        // (chrome.windows.create, chrome.tabs.create). It must stay the very browser the extension
+        // created, or the extension loses track of it, so it stays and floats over Plinth.
+        PLog([NSString stringWithFormat:@"floating a window Chromium opened (popup=%d)", browser->IsPopup()]);
+        // Chromium's own windows have no CEF browser view; go through the page's view to its window,
+        // once Chromium has put it on screen.
         CefRefPtr<CefBrowser> keep = browser;
-        // Its address arrives with the first navigation; give it a moment, then close it.
-        CefPostDelayedTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> b) {
-            std::string url = b->GetMainFrame()->GetURL().ToString();
-            NSString *address = [NSString stringWithUTF8String:url.c_str()];
-            if (gStrayHandler && address.length && ![address hasPrefix:@"chrome://newtab"] &&
-                ![address isEqualToString:@"about:blank"]) {
-                gStrayHandler(address);
-            }
-            b->GetHost()->CloseBrowser(true);
-        }, keep), 300);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            id handle = (__bridge id)keep->GetHost()->GetWindowHandle();
+            NSWindow *ns = [handle isKindOfClass:NSWindow.class] ? handle : [(NSView *)handle window];
+            if (ns) FloatWindowOverPlinth(ns, NSMakeSize(ns.frame.size.width, ns.frame.size.height));
+        });
     }
     IMPLEMENT_REFCOUNTING(StrayClient);
 };
@@ -319,6 +355,7 @@ CefScopedLibraryLoader *gLoader = nullptr;
     NSString *locale = NSLocale.preferredLanguages.firstObject;
     if (locale) CefString(&settings.locale) = CefFromNSString(locale);
 
+    gLaunchTime = CFAbsoluteTimeGetCurrent();
     CefRefPtr<PlinthCefApp> app(new PlinthCefApp(mockKeychain));
     return CefInitialize(mainArgs, settings, app, nullptr);
 }

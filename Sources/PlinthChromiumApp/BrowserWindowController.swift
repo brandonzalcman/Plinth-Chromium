@@ -83,6 +83,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
+        // Lets the bridge find Plinth's windows (to float sign-in windows over them).
+        window.identifier = NSUserInterfaceItemIdentifier("plinth.main")
         window.minSize = NSSize(width: 560, height: 380)
         // Transparent where the page shows through; clicks there pass to the page's window below.
         window.isOpaque = false

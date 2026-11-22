@@ -29,8 +29,17 @@ ditto "Vendor/cef/Release/Chromium Embedded Framework.framework" \
       "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 
 plist() {   # plist <path> <executable> <identifier> <is-helper>
-  local agent=""
+  local agent="" types=""
   [[ "$4" == "1" ]] && agent="<key>LSUIElement</key><true/>"
+  # The sidebar's drag payloads (sites, pages, pins). macOS drops drags of undeclared types.
+  [[ "$4" == "0" ]] && types="<key>UTExportedTypeDeclarations</key><array>
+    <dict><key>UTTypeIdentifier</key><string>dev.getplinth.chromium.site</string>
+      <key>UTTypeDescription</key><string>Plinth page</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array></dict>
+    <dict><key>UTTypeIdentifier</key><string>dev.getplinth.chromium.pin</string>
+      <key>UTTypeDescription</key><string>Plinth pin</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array></dict>
+  </array>"
   cat > "$1" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -56,6 +65,7 @@ plist() {   # plist <path> <executable> <identifier> <is-helper>
     <key>CFBundleURLSchemes</key><array><string>http</string><string>https</string></array>
   </dict></array>
   $agent
+  $types
 </dict></plist>
 PLIST
 }
@@ -75,4 +85,6 @@ done
 codesign --force --sign - "$APP/Contents/Frameworks/Chromium Embedded Framework.framework" >/dev/null 2>&1
 for helper in "$APP"/Contents/Frameworks/*Helper*.app(N); do codesign --force --sign - "$helper" >/dev/null 2>&1; done
 codesign --force --sign - "$APP" >/dev/null 2>&1
+# Register the build so macOS knows its drag types straight away.
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
 echo "$APP"

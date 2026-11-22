@@ -616,7 +616,7 @@ struct SidebarView: View {
         return HStack(spacing: 9) {
             siteIcon(site.key, name: site.name, colour: colour)
             Text(site.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Brand.display(13.5, weight: .semibold))
                 .foregroundStyle(palette.primary)
                 .lineLimit(1)
             if site.isKept {
@@ -753,12 +753,12 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 4) {
             if let name = downloads.justFinished {
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.system(size: 13))
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Brand.sky).font(.system(size: 13))
                         .symbolEffect(.bounce, value: name)
                     Text("Saved \(name)").font(.system(size: 12)).foregroundStyle(palette.primary).lineLimit(1)
                 }
                 .padding(.horizontal, 10).frame(height: 30)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.green.opacity(0.12)))
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Brand.blue.opacity(0.12)))
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             ForEach(running) { item in

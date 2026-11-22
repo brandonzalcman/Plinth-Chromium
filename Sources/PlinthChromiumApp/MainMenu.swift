@@ -7,7 +7,7 @@ enum MainMenu {
         let main = NSMenu()
 
         let appMenu = submenu(main, "Plinth")
-        add(appMenu, "About Plinth", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", target: NSApp)
+        add(appMenu, "About Plinth", #selector(ChromiumApp.menuAbout(_:)), "", target: app)
         add(appMenu, "Show Welcome Guide", #selector(ChromiumApp.menuShowWelcome(_:)), "", target: app)
         appMenu.addItem(.separator())
         add(appMenu, "Settings…", #selector(ChromiumApp.menuSettings(_:)), ",", target: app)

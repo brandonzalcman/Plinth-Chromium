@@ -46,6 +46,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored private(set) var downloads: DownloadsModel!
     @ObservationIgnored private(set) var storageDirectory: URL!
     @ObservationIgnored var settingsWindow: NSWindow?
+    @ObservationIgnored var aboutWindow: NSWindow?
     /// Points and levels (see Loyalty.swift).
     @ObservationIgnored var loyalty: LoyaltyController!
     /// On-device AI: resume card summaries and semantic history (see SemanticHistory.swift).

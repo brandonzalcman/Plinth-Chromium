@@ -177,6 +177,8 @@ struct TopStrip: View {
 
     var body: some View {
         HStack {
+            Spacer().frame(width: 76)   // traffic lights
+            PlinthMarkView(size: 18).opacity(0.9).help("Plinth")
             Spacer()
             ExtensionsButton(app: app, controller: controller, palette: palette)
                 .padding(.trailing, 10)
@@ -453,8 +455,8 @@ struct OverlayRoot: View {
                 // "Put away" notice, near the shelf it points to.
                 if let notice = chrome.notice {
                     HStack(spacing: 8) {
-                        Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(app.accent(scheme))
-                        Text(notice).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                        PlinthMarkView(size: 18)
+                        Text(notice).font(Brand.display(13, weight: .medium)).lineLimit(1)
                     }
                     .padding(.horizontal, 14).frame(height: 34)
                     .background(.regularMaterial, in: Capsule())

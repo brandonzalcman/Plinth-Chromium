@@ -92,7 +92,12 @@ struct SettingsSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Settings").font(.system(size: 11, weight: .semibold)).tracking(0.6).textCase(.uppercase)
+            HStack(spacing: 8) {
+                PlinthMarkView(size: 22)
+                Text("Plinth").font(Brand.display(17))
+            }
+            .padding(.leading, 10).padding(.bottom, 10)
+            Text("Settings").font(Brand.display(11, weight: .bold)).tracking(0.8).textCase(.uppercase)
                 .foregroundStyle(t.p.tertiary).padding(.leading, 12).padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
             ForEach(SettingsSection.allCases) { section in

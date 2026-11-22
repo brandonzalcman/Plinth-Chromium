@@ -49,7 +49,7 @@ struct SettingsPage<Content: View>: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 22, weight: .semibold)).foregroundStyle(t.p.primary)
+                    Text(title).font(Brand.display(24)).foregroundStyle(t.p.primary)
                         .accessibilityAddTraits(.isHeader)
                     if let subtitle {
                         Text(subtitle).font(.system(size: 12.5)).foregroundStyle(t.p.secondary)
@@ -75,7 +75,7 @@ struct SettingsCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             if let heading {
-                Text(heading.uppercased()).font(.system(size: 10.5, weight: .semibold)).tracking(0.6)
+                Text(heading.uppercased()).font(Brand.display(11, weight: .bold)).tracking(0.8)
                     .foregroundStyle(t.p.tertiary).padding(.leading, 4)
                     .accessibilityAddTraits(.isHeader)
             }

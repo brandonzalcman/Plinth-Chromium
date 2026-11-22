@@ -137,6 +137,8 @@ enum DebugSteps {
             for w in NSApp.windows where w.isVisible {
                 log("window \(type(of: w)) id=\(w.identifier?.rawValue ?? "-") \(NSStringFromRect(w.frame)) child=\(w.parent != nil)")
             }
+        case "about":
+            app.menuAbout(nil)
         case "settings":
             app.showSettings()
         case "readtext":

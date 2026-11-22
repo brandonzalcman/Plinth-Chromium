@@ -48,7 +48,11 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
         browsers[page.id] = b
         ids[ObjectIdentifier(b)] = page.id
         // CEF makes the page's window during init, before the page was registered here.
-        if b.hostWindow != nil { callbacks.hostReady(page.id) }
+        // (Next turn of the run loop: the caller is usually laying out pages right now.)
+        if b.hostWindow != nil {
+            let id = page.id
+            DispatchQueue.main.async { [weak self] in self?.callbacks.hostReady(id) }
+        }
         return b
     }
 

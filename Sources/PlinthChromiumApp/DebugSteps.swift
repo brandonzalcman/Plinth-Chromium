@@ -113,6 +113,13 @@ enum DebugSteps {
             store.setFader(FadeEngine(policy: FadePolicy(siteBaseLifetime: 2, siteLifetimePerExtraDay: 1, siteMaxLifetime: 4, pageBaseLifetime: 2, pageMaxLifetime: 4, minFadingDuration: 0.5)))
             app.scheduleFade()
             log("after fade: shelf=\(store.shelf.map { "\($0.name)(\($0.pages.count))" }) sites=\(store.window(wid)?.sites.map(\.name) ?? []) fading=\(store.window(wid)?.sites.filter { $0.fade == .fading }.map(\.name) ?? [])")
+        case "group":
+            // A group of the window's first two sites, as if its suggestion was accepted.
+            if let sites = window()?.sites, sites.count >= 2 {
+                let id = store.acceptSuggestion(GroupSuggestion(window: wid, keys: [sites[0].key, sites[1].key],
+                                                                siteNames: [sites[0].name, sites[1].name]))
+                log("group \(store.group(id)?.name ?? "-")")
+            }
         case "settings":
             app.showSettings()
         case "quit":

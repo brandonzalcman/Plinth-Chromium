@@ -43,6 +43,11 @@ struct SidebarHost: View {
             nav: nav,
             progress: selected.flatMap { app.pool.progress[$0] },
             groups: app.store.groups(in: windowID),
+            suggestion: controller.isPrivate ? nil : app.store.groupSuggestion(for: windowID).map { suggestion in
+                AnyView(GroupSuggestionView(suggestion: suggestion, accent: app.accent(scheme), icon: { favicons.image(for: $0) },
+                                            onGroup: { app.store.showGroup(app.store.acceptSuggestion(suggestion), in: windowID) },
+                                            onNotNow: { app.store.dismissSuggestion(suggestion) }))
+            },
             focusedGroup: state?.focusedGroup,
             shelfCount: controller.isPrivate ? 0 : app.store.shelf.count,
             downloads: SidebarView.Downloads(running: downloads.running, bar: downloads.barState, justFinished: finished),
@@ -98,6 +103,8 @@ struct SidebarView: View {
     let nav: BarNavState
     let progress: Double?
     let groups: [SiteGroup]
+    /// "Group these three?", when the store suggests it.
+    var suggestion: AnyView? = nil
     let focusedGroup: GroupID?
     let shelfCount: Int
     let downloads: Downloads
@@ -118,6 +125,7 @@ struct SidebarView: View {
     @State private var closedListFolders: Set<UUID> = []
     @State private var hovered: String?
     @State private var dropTarget: SiteID?
+    @State private var splitTarget: PageID?
     @Namespace private var selection
 
     /// Room for the traffic lights at the top left.
@@ -142,6 +150,10 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if !model.pins.isEmpty { pinned.padding(.horizontal, 10).padding(.top, 14) }
                     if !groups.isEmpty { groupChips.padding(.top, 14) }
+                    if let suggestion {
+                        suggestion.scaleEffect(0.92, anchor: .leading).padding(.horizontal, 10).padding(.top, 12)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
                     newPageRow
                     LazyVStack(alignment: .leading, spacing: 3) {
                         ForEach(Array(model.sites.enumerated()), id: \.element.id) { index, site in
@@ -564,19 +576,23 @@ struct SidebarView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(site.isCurrent && !site.isSingle ? colour.opacity(0.07) : .clear)
         )
+        // Dropping in the thin gap above a site moves the dragged site there.
         .overlay(alignment: .top) {
-            if dropTarget == site.id { Capsule().fill(accent).frame(height: 2).offset(y: -2).transition(.opacity) }
+            ZStack {
+                Color.clear.frame(height: 10).contentShape(Rectangle())
+                if dropTarget == site.id { Capsule().fill(accent).frame(height: 2).transition(.opacity) }
+            }
+            .offset(y: -6)
+            .dropDestination(for: SidebarDragItem.self) { items, _ in
+                dropTarget = nil
+                guard let dragged = items.first?.site, dragged != site.id else { return false }
+                onAction(.moveSite(dragged, toIndex: index))
+                return true
+            } isTargeted: { dropTarget = $0 ? site.id : (dropTarget == site.id ? nil : dropTarget) }
         }
-        .draggable(SiteDragItem(id: site.id.raw.uuidString)) {
+        .draggable(SidebarDragItem(site: site.id, page: site.pages.first { $0.isCurrent }?.id ?? site.pages[0].id)) {
             Label(site.name, systemImage: "globe").padding(6).background(.regularMaterial, in: .rect(cornerRadius: 8))
         }
-        .dropDestination(for: SiteDragItem.self) { items, _ in
-            dropTarget = nil
-            guard let dragged = items.first.flatMap({ UUID(uuidString: $0.id) }).map({ SiteID($0) }),
-                  dragged != site.id else { return false }
-            onAction(.moveSite(dragged, toIndex: index))
-            return true
-        } isTargeted: { dropTarget = $0 ? site.id : (dropTarget == site.id ? nil : dropTarget) }
         .contextMenu { siteMenu(site) }
     }
 
@@ -674,9 +690,30 @@ struct SidebarView: View {
         .overlay(shape.strokeBorder(page.fade == .fading ? palette.tertiary : .clear, style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
         .opacity(page.fade == .fading && !page.isCurrent ? 0.55
                  : Freshness.opacity(lastUsed: page.lastUsed, now: clock, isCurrent: page.isCurrent, kept: site.isKept))
+        // Drop another page here to see the two side by side.
+        .overlay {
+            if splitTarget == page.id {
+                shape.strokeBorder(accent, lineWidth: 2)
+                    .overlay(alignment: .trailing) {
+                        Label("Split", systemImage: "rectangle.split.2x1").font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.white).padding(.horizontal, 7).frame(height: 18)
+                            .background(Capsule().fill(accent)).padding(.trailing, 6)
+                    }
+                    .transition(.opacity)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { onAction(.selectPage(page.id)) }
         .onHover { hovered = $0 ? key : (hovered == key ? nil : hovered) }
+        .draggable(SidebarDragItem(site: site.id, page: page.id)) {
+            Label(page.name, systemImage: "doc").padding(6).background(.regularMaterial, in: .rect(cornerRadius: 8))
+        }
+        .dropDestination(for: SidebarDragItem.self) { items, _ in
+            splitTarget = nil
+            guard let dragged = items.first?.page, dragged != page.id else { return false }
+            onAction(.splitPages(dragged, onto: page.id))
+            return true
+        } isTargeted: { splitTarget = $0 ? page.id : (splitTarget == page.id ? nil : splitTarget) }
         .contextMenu { pageMenu(page, site: site) }
     }
 
@@ -883,9 +920,13 @@ struct PressStyle: ButtonStyle {
     }
 }
 
-/// Drag payloads for reordering inside the sidebar.
-struct SiteDragItem: Codable, Transferable {
-    let id: String
+/// A site or page dragged in the sidebar: onto a gap it reorders sites, onto a page it splits.
+struct SidebarDragItem: Codable, Transferable {
+    let siteRaw: UUID
+    let pageRaw: UUID
+    init(site: SiteID, page: PageID) { siteRaw = site.raw; pageRaw = page.raw }
+    var site: SiteID { SiteID(siteRaw) }
+    var page: PageID { PageID(pageRaw) }
     static var transferRepresentation: some TransferRepresentation { CodableRepresentation(contentType: .plinthSite) }
 }
 

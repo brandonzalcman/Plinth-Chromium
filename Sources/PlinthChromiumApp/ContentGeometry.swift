@@ -10,10 +10,15 @@ public struct ContentGeometry: Equatable, Sendable {
     public var sidebarCollapsed: Bool
     /// The chrome is hidden (a page went full screen): the page fills the window.
     public var chromeHidden: Bool
+    /// Room kept above the dock for its accessory row (group chips, a group suggestion).
+    public var accessoryHeight: CGFloat
 
-    public init(layout: TabLayout, sidebarCollapsed: Bool = false, chromeHidden: Bool = false) {
+    public init(layout: TabLayout, sidebarCollapsed: Bool = false, chromeHidden: Bool = false, accessoryHeight: CGFloat = 0) {
         self.layout = layout; self.sidebarCollapsed = sidebarCollapsed; self.chromeHidden = chromeHidden
+        self.accessoryHeight = accessoryHeight
     }
+
+    public static let accessoryRowHeight: CGFloat = 44
 
     /// The gap between the page and the window edge or the chrome.
     public static let margin: CGFloat = 8
@@ -43,7 +48,7 @@ public struct ContentGeometry: Equatable, Sendable {
         let rect: CGRect
         switch layout {
         case .dock:
-            let bottom = Self.dockHeight + m
+            let bottom = Self.dockHeight + m + accessoryHeight
             rect = CGRect(x: m, y: bottom, width: size.width - 2 * m, height: size.height - bottom - Self.titlebarHeight)
         case .sidebar:
             let left = sidebarColumnWidth

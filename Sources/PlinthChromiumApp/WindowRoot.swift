@@ -59,8 +59,7 @@ struct WindowRoot: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            let g = ContentGeometry(layout: app.prefs.value.tabLayout, sidebarCollapsed: app.prefs.value.sidebarCollapsed,
-                                    chromeHidden: chrome.chromeHidden)
+            let g = controller.geometryForDrawing(chrome)
             let palette = ShellPalette(scheme, isPrivate: controller.isPrivate)
             // SwiftUI measures from the top; the controller's frames are AppKit's (from the bottom).
             let flip = { (r: CGRect) in CGRect(x: r.minX, y: size.height - r.maxY, width: r.width, height: r.height) }
@@ -83,6 +82,15 @@ struct WindowRoot: View {
                     case .dock:
                         TopStrip(app: app, controller: controller, palette: palette)
                             .frame(width: size.width, height: ContentGeometry.titlebarHeight)
+                        if g.accessoryHeight > 0 {
+                            DockAccessoryRow(app: app, controller: controller)
+                                .frame(width: size.width - BarMetrics.standard.sideInset * 2, height: ContentGeometry.accessoryRowHeight,
+                                       alignment: .leading)
+                                .offset(x: BarMetrics.standard.sideInset,
+                                        y: size.height - BarMetrics.standard.barHeight - BarMetrics.standard.bottomInset
+                                            - ContentGeometry.accessoryRowHeight - 2)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
                         DockHost(app: app, controller: controller, chrome: chrome)
                             .frame(width: size.width - BarMetrics.standard.sideInset * 2, height: BarMetrics.standard.barHeight)
                             .offset(x: BarMetrics.standard.sideInset, y: size.height - BarMetrics.standard.barHeight - BarMetrics.standard.bottomInset)
@@ -181,6 +189,37 @@ struct ProgressLine: View {
                 .animation(.easeOut(duration: 0.2), value: progress)
                 .allowsHitTesting(false)
         }
+    }
+}
+
+/// Group chips, or a suggestion to group sites you keep open together, just above the dock.
+struct DockAccessoryRow: View {
+    let app: ChromiumApp
+    let controller: BrowserWindowController
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let store = app.store!
+        let windowID = controller.windowID
+        let focused = store.window(windowID)?.focusedGroup
+        let groups = store.groups(in: windowID)
+        let accent = app.accent(scheme)
+        HStack(spacing: 8) {
+            if !groups.isEmpty {
+                ForEach(groups) { group in
+                    GroupChipView(group: group, isFiltering: focused == group.id, accent: accent,
+                                  icon: { app.pool.favicons.image(for: $0) },
+                                  onToggle: { focused == group.id ? store.setFocus(nil, in: windowID) : store.showGroup(group.id, in: windowID) },
+                                  onRemove: { store.deleteGroup(group.id) })
+                }
+            } else if let suggestion = store.groupSuggestion(for: windowID) {
+                GroupSuggestionView(suggestion: suggestion, accent: accent, icon: { app.pool.favicons.image(for: $0) },
+                                    onGroup: { store.showGroup(store.acceptSuggestion(suggestion), in: windowID) },
+                                    onNotNow: { store.dismissSuggestion(suggestion) })
+            }
+            Spacer(minLength: 0)
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: groups)
     }
 }
 
@@ -337,8 +376,7 @@ struct OverlayRoot: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            let g = ContentGeometry(layout: app.prefs.value.tabLayout, sidebarCollapsed: app.prefs.value.sidebarCollapsed,
-                                    chromeHidden: chrome.chromeHidden)
+            let g = controller.geometryForDrawing(chrome)
             ZStack(alignment: .topLeading) {
                 // Rounds the pages' corners by covering them with the surface colour.
                 if !chrome.chromeHidden {

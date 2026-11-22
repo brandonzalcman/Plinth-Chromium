@@ -30,6 +30,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored private(set) var downloads: DownloadsModel!
     @ObservationIgnored private(set) var storageDirectory: URL!
     @ObservationIgnored var settingsWindow: NSWindow?
+    /// Points and levels (see Loyalty.swift).
+    @ObservationIgnored var loyalty: LoyaltyController!
 
     /// Bumped whenever a page's loading state changes, so the chrome redraws its buttons and progress.
     var loadingTick = 0
@@ -129,6 +131,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             PCEFRuntime.downloadsDirectory = folder
         }
         connect()
+        setUpLoyalty()
         settings.observe { [weak self] old, new in self?.settingsDidChange(from: old, to: new) }
         prefs.observe { [weak self] old, new in
             guard let self, old.tabLayout != new.tabLayout || old.sidebarCollapsed != new.sidebarCollapsed else { return }
@@ -167,10 +170,12 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// A brand colour the current level has not unlocked falls back to blue, as on the Mac.
     func accent(_ scheme: ColorScheme) -> Color {
-        let c = accentChoice.rgb
+        let choice = accentChoice.effective(atLevel: loyaltyLevel)
+        let c = choice.rgb
         // The deepest brand colours lift a little on a dark surface so the current page still reads.
-        let lift = scheme == .dark && (accentChoice == .midnight || accentChoice == .mono) ? 0.35 : 0
+        let lift = scheme == .dark && (choice == .midnight || choice == .mono) ? 0.35 : 0
         func mix(_ v: Double) -> Double { v / 255 + (1 - v / 255) * lift }
         return Color(red: mix(c.r), green: mix(c.g), blue: mix(c.b))
     }
@@ -198,7 +203,11 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         return true
     }
 
-    public func applicationDidBecomeActive(_ notification: Notification) { if store != nil { scheduleFade() } }
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        guard store != nil else { return }
+        scheduleFade()
+        loyaltyDidBecomeActive()
+    }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
         guard didFinishLaunching else { pendingOpenURLs.append(contentsOf: urls); return }
@@ -216,6 +225,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         PCEFRuntime.log("terminate: \(pool.allBrowsers.count) pages open")
         for c in controllers.values { c.saveFrame() }
         store.flush()
+        ShareCard.removeLeftovers()
         extensions.closePopup()
         // Closing for quit keeps every page in the store for next launch.
         pool.closeAll()
@@ -364,6 +374,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     private func recordDwell() {
         guard NSApp.isActive else { return }
         store.noteCoOpen(seconds: dwellInterval)
+        loyaltyTick()
         guard let id = keyWindowID, let window = store.window(id) else { return }
         for page in window.visiblePageIDs { store.recordDwell(page, seconds: dwellInterval) }
     }

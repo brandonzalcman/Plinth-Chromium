@@ -105,7 +105,20 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
     var geometry: ContentGeometry {
         ContentGeometry(layout: app.prefs.value.tabLayout, sidebarCollapsed: app.prefs.value.sidebarCollapsed,
-                        chromeHidden: chrome.chromeHidden)
+                        chromeHidden: chrome.chromeHidden,
+                        accessoryHeight: app.prefs.value.tabLayout == .dock && hasAccessories ? ContentGeometry.accessoryRowHeight : 0)
+    }
+
+    /// The geometry as SwiftUI should draw it: reads the observed state so views follow changes.
+    func geometryForDrawing(_ chrome: WindowChrome) -> ContentGeometry {
+        _ = chrome.chromeHidden
+        _ = app.prefs.value
+        return geometry
+    }
+
+    /// The dock shows group chips, or a suggestion to make a group, in a row above the bar.
+    var hasAccessories: Bool {
+        !app.store.groups(in: windowID).isEmpty || app.store.groupSuggestion(for: windowID) != nil
     }
 
     private var contentSize: CGSize { window.contentView?.bounds.size ?? window.frame.size }
@@ -116,6 +129,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         withObservationTracking {
             _ = app.store.window(windowID)
             _ = app.store.pins
+            _ = app.store.groups
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }

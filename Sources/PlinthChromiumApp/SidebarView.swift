@@ -181,6 +181,7 @@ struct SidebarView: View {
     private var header: some View {
         HStack(spacing: 0) {
             if leavesRoomForTrafficLights { Spacer().frame(width: Self.trafficLightsWidth) }
+            PlinthMarkView(size: 20).opacity(0.9).help("Plinth")
             Spacer()
             iconButton("chevron.left", help: "Back (⌘[)", enabled: nav.canGoBack) { onAction(.goBack) }
             iconButton("chevron.right", help: "Forward (⌘])", enabled: nav.canGoForward) { onAction(.goForward) }
@@ -197,7 +198,7 @@ struct SidebarView: View {
         let isHovered = hovered == "newpage"
         return Button { onAction(.newPage) } label: {
             HStack(spacing: 8) {
-                Text("Open").font(.system(size: 10.5, weight: .semibold)).tracking(0.6).textCase(.uppercase)
+                Text("Open").font(Brand.display(11, weight: .bold)).tracking(0.8).textCase(.uppercase)
                     .foregroundStyle(palette.tertiary)
                 Spacer()
                 if isHovered {
@@ -222,7 +223,7 @@ struct SidebarView: View {
 
     private func sectionTitle<Trailing: View>(_ title: String, @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack {
-            Text(title).font(.system(size: 10.5, weight: .semibold)).tracking(0.6).textCase(.uppercase)
+            Text(title).font(Brand.display(11, weight: .bold)).tracking(0.8).textCase(.uppercase)
                 .foregroundStyle(palette.tertiary)
             Spacer()
             trailing()
@@ -271,7 +272,7 @@ struct SidebarView: View {
             .overlay(alignment: .bottomLeading) {
                 if let progress {
                     GeometryReader { g in
-                        Capsule().fill(colour).frame(width: max(10, (g.size.width - 20) * progress), height: 2)
+                        Capsule().fill(Brand.skyAcross).frame(width: max(10, (g.size.width - 20) * progress), height: 2)
                             .offset(x: 10, y: g.size.height - 2.5)
                             .animation(.easeOut(duration: 0.2), value: progress)
                     }
@@ -316,12 +317,11 @@ struct SidebarView: View {
                     }
                     .padding(.horizontal, 6)
                     .padding(.bottom, 7)
-                    // The plinth itself: a slab the pins stand on, lit from above.
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(LinearGradient(colors: [palette.primary.opacity(0.16), palette.primary.opacity(0.05)],
-                                             startPoint: .top, endPoint: .bottom))
-                        .frame(height: 7)
-                        .overlay(alignment: .top) { Rectangle().fill(palette.primary.opacity(0.18)).frame(height: 1) }
+                    // The plinth itself, drawn like the slab in the Plinth mark: a solid bar the pins stand on.
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(palette.primary.opacity(0.82))
+                        .frame(height: 6)
+                        .padding(.horizontal, -2)
                 }
                 if let id = openFolder, let folder = iconSlots.compactMap({ slot -> SidebarModel.Folder? in
                     if case .folder(let f) = slot, f.id == id { return f } else { return nil }
@@ -853,7 +853,7 @@ struct SidebarView: View {
                     let sites = model.rail.filter { if case .site = $0.kind { true } else { false } }
                     ForEach(pins) { railTile($0) }
                     if !pins.isEmpty {
-                        RoundedRectangle(cornerRadius: 2).fill(palette.primary.opacity(0.14)).frame(width: 36, height: 4)
+                        RoundedRectangle(cornerRadius: 2).fill(palette.primary.opacity(0.82)).frame(width: 40, height: 5)
                             .padding(.bottom, 4)
                     }
                     ForEach(sites) { railTile($0).transition(.scale.combined(with: .opacity)) }

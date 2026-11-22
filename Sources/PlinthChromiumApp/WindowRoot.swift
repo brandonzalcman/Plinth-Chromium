@@ -27,23 +27,25 @@ struct ShellPalette {
             hairline = Color.white.opacity(0.10)
             pageShadow = Color.black.opacity(0.5)
         } else if scheme == .dark {
-            surface = Color(red: 0.105, green: 0.105, blue: 0.115)
-            raised = Color.white.opacity(0.07)
-            hover = Color.white.opacity(0.055)
-            primary = Color.white.opacity(0.92)
-            secondary = Color.white.opacity(0.56)
-            tertiary = Color.white.opacity(0.34)
-            hairline = Color.white.opacity(0.09)
+            // Warm ink, the brand's dark: a touch of brown in the black, paper-tinted text.
+            surface = Color(hex: 0x1C1B19)
+            raised = Brand.paper.opacity(0.07)
+            hover = Brand.paper.opacity(0.06)
+            primary = Brand.paper.opacity(0.94)
+            secondary = Brand.paper.opacity(0.58)
+            tertiary = Brand.paper.opacity(0.36)
+            hairline = Brand.paper.opacity(0.10)
             pageShadow = Color.black.opacity(0.45)
         } else {
-            surface = Color(red: 0.925, green: 0.925, blue: 0.935)
-            raised = Color.white.opacity(0.75)
-            hover = Color.black.opacity(0.045)
-            primary = Color.black.opacity(0.86)
-            secondary = Color.black.opacity(0.52)
-            tertiary = Color.black.opacity(0.32)
-            hairline = Color.black.opacity(0.08)
-            pageShadow = Color.black.opacity(0.16)
+            // Warm paper, the brand's light: the icon's tile, a shade deeper so pages sit on it.
+            surface = Color(hex: 0xEDE7DB)
+            raised = Color(hex: 0xFAF8F3)
+            hover = Brand.ink.opacity(0.05)
+            primary = Brand.ink.opacity(0.92)
+            secondary = Brand.ink.opacity(0.58)
+            tertiary = Brand.ink.opacity(0.38)
+            hairline = Brand.sand.opacity(0.9)
+            pageShadow = Brand.ink.opacity(0.14)
         }
     }
 }
@@ -134,24 +136,35 @@ struct Surface: View {
     }
 }
 
-/// Shown when a window has no page: a calm sheet with a way to start.
+/// Shown when a window has no page: the mark, the name, and a way to start.
 struct EmptyWindow: View {
     let app: ChromiumApp
     let controller: BrowserWindowController
     let frame: CGRect
     let radius: CGFloat
     let palette: ShellPalette
+    @State private var hovered = false
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Plinth").font(.system(size: 28, weight: .semibold, design: .rounded)).foregroundStyle(palette.secondary)
-            Button("Search or enter an address") { controller.openCommandBar(newPage: true) }
-                .buttonStyle(.borderless)
+        VStack(spacing: 18) {
+            PlinthMarkView(size: 72)
+            Text("Plinth").font(Brand.display(34)).foregroundStyle(palette.primary)
+            Button { controller.openCommandBar(newPage: true) } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .semibold))
+                    Text("Search or enter an address").font(.system(size: 14))
+                    Text("⌘T").font(.system(size: 11.5, weight: .medium, design: .rounded)).foregroundStyle(palette.tertiary)
+                }
                 .foregroundStyle(palette.secondary)
-            Text("⌘T").font(.system(size: 11, design: .rounded)).foregroundStyle(palette.tertiary)
+                .padding(.horizontal, 18).frame(height: 42)
+                .background(Capsule().fill(palette.raised))
+                .overlay(Capsule().strokeBorder(hovered ? Brand.blue.opacity(0.5) : palette.hairline, lineWidth: 1))
+            }
+            .buttonStyle(PressStyle(scale: 0.97))
+            .onHover { hovered = $0 }
         }
         .frame(width: frame.width, height: frame.height)
-        .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(palette.raised))
+        .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(palette.raised.opacity(0.6)))
         .offset(x: frame.minX, y: frame.minY)
     }
 }
@@ -183,7 +196,7 @@ struct ProgressLine: View {
         let id = controller.shown.first
         let _ = app.loadingTick   // redraw as progress changes
         if let frame, let id, let progress = app.pool.progress[id] {
-            Capsule().fill(accent)
+            Capsule().fill(Brand.skyAcross)
                 .frame(width: max(8, (frame.width - 24) * progress), height: 2)
                 .offset(x: frame.minX + 12, y: frame.minY - 4)
                 .animation(.easeOut(duration: 0.2), value: progress)

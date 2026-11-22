@@ -57,6 +57,8 @@ let package = Package(
                 .product(name: "PlinthCore", package: "Plinth"),
                 .product(name: "PlinthMacUI", package: "Plinth"),
             ],
+            // Space Grotesk, the brand's display face (SIL Open Font License, OFL.txt beside it).
+            resources: [.copy("Resources/Fonts")],
             swiftSettings: ui
         ),
         .executableTarget(name: "PlinthChromium", dependencies: ["PlinthChromiumApp"], swiftSettings: ui),

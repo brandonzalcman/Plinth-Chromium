@@ -78,6 +78,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     /// Starts Chromium and runs the app. Called from the executable's main.swift.
     public static func main() {
         let application = PCEFApplication.shared as! PCEFApplication
+        Brand.registerFonts()
         let env = ProcessInfo.processInfo.environment
         let support = Self.storageDirectory(env)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)

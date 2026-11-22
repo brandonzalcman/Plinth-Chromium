@@ -45,18 +45,18 @@ public struct ContentGeometry: Equatable, Sendable {
     public func pageFrame(in size: CGSize) -> CGRect {
         if chromeHidden { return CGRect(origin: .zero, size: size) }
         let m = Self.margin
-        let rect: CGRect
+        // Widths and heights are clamped before the rect is made: CGRect would quietly flip a negative size.
         switch layout {
         case .dock:
             let bottom = Self.dockHeight + m + accessoryHeight
-            rect = CGRect(x: m, y: bottom, width: size.width - 2 * m, height: size.height - bottom - Self.titlebarHeight)
+            return CGRect(x: m, y: bottom, width: max(0, size.width - 2 * m),
+                          height: max(0, size.height - bottom - Self.titlebarHeight))
         case .sidebar:
             let left = sidebarColumnWidth
             // The rail is narrower than the traffic lights, so the page starts below them.
             let top = sidebarCollapsed ? Self.titlebarHeight : m
-            rect = CGRect(x: left, y: m, width: size.width - left - m, height: size.height - m - top)
+            return CGRect(x: left, y: m, width: max(0, size.width - left - m), height: max(0, size.height - m - top))
         }
-        return CGRect(x: rect.minX, y: rect.minY, width: max(0, rect.width), height: max(0, rect.height))
     }
 
     /// The two panes of a split, left then right, `fraction` of the width going to the left one.

@@ -14,6 +14,8 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
         var didUpdate: (PageID, URL?, String?) -> Void = { _, _, _ in }
         /// A link asked for a new page. `background` for ⌘-click.
         var openRequest: (URL, _ opener: PageID, _ background: Bool) -> Void = { _, _, _ in }
+        /// ⇧-click on a link: preview it in a peek card (Peek/PeekRules.swift).
+        var peekRequest: (URL, _ opener: PageID) -> Void = { _, _ in }
         /// A main-frame navigation; return false to cancel it.
         var shouldNavigate: (PageID, URL, _ linkClick: Bool) -> Bool = { _, _, _ in true }
         var loadingChanged: (PageID) -> Void = { _ in }
@@ -189,10 +191,17 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
     }
 
     func browser(_ browser: PCEFBrowser, openURL url: String, disposition: PCEFOpenDisposition, userGesture: Bool) -> Bool {
-        // Scripted popups (sign-in windows) keep their own small window and their opener.
-        if disposition == .popup { return false }
-        guard let id = id(of: browser), let target = URL(string: url) else { return true }
-        callbacks.openRequest(target, id, disposition == .backgroundTab)
+        let target = URL(string: url)
+        PCEFRuntime.log("open request: disposition=\(LinkDisposition(disposition)) gesture=\(userGesture)")
+        switch LinkOpening.decide(LinkDisposition(disposition), userGesture: userGesture, url: target) {
+        case .popup:
+            // Scripted popups (sign-in windows) keep their own small window and their opener.
+            return false
+        case .peek:
+            if let id = id(of: browser), let target { callbacks.peekRequest(target, id) }
+        case .page(let background):
+            if let id = id(of: browser), let target { callbacks.openRequest(target, id, background) }
+        }
         return true
     }
 

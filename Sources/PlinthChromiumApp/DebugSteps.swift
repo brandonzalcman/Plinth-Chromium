@@ -17,6 +17,10 @@ import PlinthSidebar
 /// bmstate · historycount · clearhistory · import <browser> · pw add|list|answer|pending|delete|clear … ·
 /// pwimport <browser> · pwcsv <file> · pwfocus <css> · pwtype <css> <text> · pwsubmit <css> · pwvalue <css> ·
 /// sync · syncon · syncoff · syncpeer · syncnow · shot <png> · settingsat <section>
+///
+/// The welcome guide and peek (DebugWelcomePeekSteps.swift): welcome [card] · welcomestate · welcomenext ·
+/// welcomeback · welcomego <card> · welcomeskip · welcomeimport · welcomekey <key> · peek <url> · peekstate · peekopen ·
+/// peekclose · peekfocuspage · key <key> · peekclickout · shiftclick <css>
 @MainActor
 enum DebugSteps {
     static func runIfRequested(_ app: ChromiumApp) {

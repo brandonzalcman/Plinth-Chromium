@@ -54,6 +54,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored var indexedHistory = Set<UUID>()
     /// Windows for links from other apps (see MiniWindow.swift).
     @ObservationIgnored var miniWindows: [MiniWindowController] = []
+    /// The welcome guide, while it is open (see Welcome/WelcomeWindow.swift).
+    @ObservationIgnored var welcome: WelcomeWindowController?
 
     /// Bumped whenever a page's loading state changes, so the chrome redraws its buttons and progress.
     var loadingTick = 0
@@ -68,6 +70,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored private let dwellInterval: TimeInterval = 5
     @ObservationIgnored private var pendingOpenURLs: [URL] = []
     @ObservationIgnored private var didFinishLaunching = false
+    /// Quit has begun: every page's browser is closing, and none may be made again.
+    @ObservationIgnored private(set) var isTerminating = false
 
     // MARK: Entry point
 
@@ -168,6 +172,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu.build(app: self)
 
         scheduleFade()
+        // A profile with no windows yet is a new one: it gets the welcome guide.
+        let profileHadWindows = !store.windows.isEmpty
         if store.windows.isEmpty { store.createWindow() }
         if let list = env["PLINTH_OPEN"], let first = store.windows.first?.id {
             for text in list.split(separator: ",") {
@@ -184,6 +190,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         let early = pendingOpenURLs
         pendingOpenURLs = []
         for url in early { openFromOtherApp(url) }
+        launchWelcomeIfNeeded(profileHadWindows: profileHadWindows)
         DebugSteps.runIfRequested(self)
     }
 
@@ -247,6 +254,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     /// Quit: save, close every page, and let Chromium wind down before the process exits.
     func terminate() {
         PCEFRuntime.log("terminate: \(pool.allBrowsers.count) pages open")
+        isTerminating = true
+        for c in controllers.values { c.closePeek() }
         for c in controllers.values { c.saveFrame() }
         store.flush()
         bookmarks.flush()
@@ -279,6 +288,10 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             guard let self, let window = self.store.windowID(containing: opener) ?? self.windowShowing(opener) ?? self.keyWindowID
             else { return }
             self.store.openPage(url: url, in: window, select: !background, opener: opener)
+        }
+        pool.callbacks.peekRequest = { [weak self] url, opener in
+            guard let self, let window = self.windowShowing(opener) ?? self.keyWindowID else { return }
+            self.controllers[window]?.showPeek(url)
         }
         pool.callbacks.shouldNavigate = { [weak self] id, url, linkClick in
             guard let self else { return true }
@@ -445,7 +458,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @objc func menuClosePage(_ sender: Any?) {
         if let mini = keyMiniWindow { mini.window.performClose(nil); return }
         guard let id = keyWindowID, let controller = controllers[id] else { NSApp.keyWindow?.performClose(nil); return }
-        if controller.dismissPanel() { return }
+        if controller.dismissPanel() || controller.closePeek() { return }
         if let page = store.window(id)?.selectedPageID, store.window(id)?.page(page) != nil {
             ActionRouter.closePage(page, in: id, store: store)
         } else {
@@ -508,7 +521,7 @@ extension ChromiumApp: NSMenuItemValidation {
         case #selector(menuUseDock(_:)): item.state = prefs.value.tabLayout == .dock ? .on : .off
         case #selector(menuUseSidebar(_:)): item.state = prefs.value.tabLayout == .sidebar ? .on : .off
         case #selector(menuToggleAI(_:)): item.state = ai.isEnabled ? .on : .off
-        case #selector(menuPromoteMini(_:)): return keyMiniWindow != nil
+        case #selector(menuPromoteMini(_:)): return keyMiniWindow != nil || keyController?.isPeeking == true
         case #selector(menuToggleSync(_:)): item.state = sync != nil ? .on : .off
         case #selector(menuBookmarkPage(_:)):
             return keyMiniWindow == nil && keyWindowID.flatMap { store.window($0)?.selectedPageID } != nil

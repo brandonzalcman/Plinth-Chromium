@@ -105,8 +105,7 @@ iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
 - **Background pages restored from the last session load only when first shown.**
 - Downloads are Plinth's own (saved to the Downloads folder or the one in Settings, shown in the
   dock's downloads button, the sidebar and the shared downloads tray); Chromium's download bubble is off.
-- Not ported yet from the Mac app: Ask,
-  the welcome guide, peek, split-view divider dragging, page snapshots on the shelf,
+- Not ported yet from the Mac app: Ask, split-view divider dragging, page snapshots on the shelf,
   content blocking (use an extension for now), and drag-and-drop between windows.
 - **No Chromium sandbox** (`no_sandbox`), no hardened runtime, no notarization, no Sparkle yet.
 - On-device AI (Foundation Models, as on the Mac) drives semantic history and the resume card's summary.
@@ -114,5 +113,11 @@ iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
   helper (`-[PCEFBrowser evaluateJavaScript:completion:]`, a process message to `PlinthChromiumHelper`),
   with Chromium's plain text as a fallback. Unlike WebKit's isolated content world, it runs in the page's
   own JavaScript world, so a page that rewrites built-ins can affect what is read.
+- Peek (⇧-click a link) arrives from Chromium as a "new window" disposition with a user gesture. The card is a
+  child window above the pages (backdrop and the shared `PeekCardView`), the previewed page is its own
+  `PCEFBrowser` placed over the card's body, and the overlay rounds its corners. Open as Page hands the same
+  browser to the pool. The backdrop leaves the title strip clear, so the traffic lights stay usable.
+- The welcome guide is this build's own (Welcome/), shown on a new profile's first launch as a child window
+  of the browser window, above its overlay.
 - The resume card floats in a small child window of its own, above the pages and below the overlay, so its
   × button gets clicks while the rest of the page still does.

@@ -374,7 +374,8 @@ extension ChromiumApp {
         controller(for: target)?.window.makeKeyAndOrderFront(nil)
     }
 
+    /// ⇧⌘↩: a mini window's page moves into a main window; a peek card's page opens as a page.
     @objc func menuPromoteMini(_ sender: Any?) {
-        if let mini = keyMiniWindow { promote(mini) }
+        if let mini = keyMiniWindow { promote(mini) } else { keyController?.promotePeek() }
     }
 }

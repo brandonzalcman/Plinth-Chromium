@@ -111,7 +111,7 @@ extension DebugSteps {
             app.showSettings()
             SettingsWindowController.shared?.select(section: arg)
         default:
-            return false
+            return await runWelcomeOrPeek(command, arg, app)
         }
         return true
     }

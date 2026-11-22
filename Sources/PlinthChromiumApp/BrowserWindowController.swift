@@ -41,6 +41,8 @@ final class WindowChrome {
     var notice: String?
     /// The "where you left off" card, shown only after a site comes back from the shelf (ResumeCards.swift).
     var resumeCard: ResumeCard?
+    /// The page inside the peek card, in view coordinates, once its window is showing (Peek/).
+    var peekPage: CGRect?
 }
 
 /// A clear window above the pages that holds what floats over them: the panels and the sidebar's
@@ -73,6 +75,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     var resumeCardWindow: ResumeCardWindow?
     var resumeCardRetryPending = false
     var lastResumeCardSize: CGSize = .zero
+    /// The link preview over the page, while one is showing (Peek/PeekWindowFeatures.swift).
+    var peek: PeekController?
 
     init(app: ChromiumApp, windowID: WindowID) {
         self.app = app
@@ -199,6 +203,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     }
 
     func refreshContent() {
+        // A store change that lands after Quit began would make a fresh browser that nothing then closes.
+        guard !app.isTerminating else { return }
         let (ids, fraction) = pagesToShow()
         let size = contentSize
         let g = geometry
@@ -228,12 +234,14 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         if chrome.pendingFrames != pending { chrome.pendingFrames = pending }
         dropResumeCardIfStale()
         syncResumeCardWindow()
+        syncPeek()
         keepOverlayOnTop()
         for id in chrome.attached.keys where !ids.contains(id) { chrome.attached[id] = nil }
 
         let name = app.store.window(windowID)?.selectedPageID.flatMap { app.store.page($0)?.name } ?? "Plinth"
         window.title = (isPrivate ? "Private — " : "") + name
         if changed {
+            closePeek()
             if chrome.panel == .find { chrome.panel = .none }
             if chrome.panel == .none, window.isKeyWindow || app.pool.existing(ids.first ?? PageID())?.hostWindow?.isKeyWindow == true {
                 focusPage()
@@ -254,6 +262,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
     func setChromeHidden(_ hidden: Bool) {
         guard chrome.chromeHidden != hidden else { return }
+        if hidden { closePeek() }
         chrome.chromeHidden = hidden
         refreshContent()
     }
@@ -275,11 +284,12 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         return f
     }
 
-    /// Pages are children of the window too; the resume card (when showing) and then the overlay stay
-    /// above all of them. Child windows stack in the order they were added, so those two are re-added
-    /// last when they aren't.
+    /// Pages are children of the window too; the resume card and the peek card with its page (when
+    /// showing) and then the overlay stay above all of them, with the welcome guide on top while it is open. Child windows stack in the order they were
+    /// added, so those are re-added last when they aren't.
     func keepOverlayOnTop() {
-        let floating: [NSWindow] = [resumeCardWindow].compactMap { $0 }.filter { $0.parent === window } + [overlay]
+        let floating: [NSWindow] = [resumeCardWindow, peek?.window, peek?.browser?.hostWindow].compactMap { $0 }
+            .filter { $0.parent === window } + [overlay] + [app.welcome?.window].compactMap { $0 }.filter { $0.parent === window }
         guard let children = window.childWindows,
               !zip(children.suffix(floating.count), floating).allSatisfy({ $0 === $1 }) || children.count < floating.count
         else { return }
@@ -325,6 +335,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
     func showPanel(_ panel: WindowChrome.Panel) {
         if chrome.flyoutOpen { chrome.flyoutOpen = false }
+        if panel != .none { closePeek() }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) { chrome.panel = panel }
         syncOverlay()
         if panel != .none { overlay.makeKey() }
@@ -446,6 +457,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
     func windowWillClose(_ notification: Notification) {
         saveFrame()
+        closePeek()
         for id in shown { app.pool.existing(id)?.attach(to: nil, frame: .zero, cornerRadius: 0) }
         resumeTask?.cancel()
         if let card = resumeCardWindow { window.removeChildWindow(card); card.orderOut(nil) }

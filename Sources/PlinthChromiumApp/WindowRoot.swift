@@ -414,6 +414,11 @@ struct OverlayRoot: View {
                         CGRect(x: r.minX, y: size.height - r.maxY, width: r.width, height: r.height)
                     }, radius: g.cornerRadius, colour: ShellPalette(scheme, isPrivate: controller.isPrivate).surface)
                 }
+                // The peek card's page, rounded against the card's body (Peek/PeekController.swift).
+                if let r = chrome.peekPage {
+                    CornerCaps(frames: [CGRect(x: r.minX, y: size.height - r.maxY, width: r.width, height: r.height)],
+                               radius: PeekLayout.pageRadius, colour: PanelPalette(scheme).inputFill)
+                }
                 if chrome.flyoutOpen {
                     // A click on the page side closes the flyout.
                     Color.black.opacity(0.06)

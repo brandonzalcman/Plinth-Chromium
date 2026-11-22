@@ -276,12 +276,29 @@ public:
         // created, or the extension loses track of it, so it stays and floats over Plinth.
         PLog([NSString stringWithFormat:@"floating a window Chromium opened (popup=%d)", browser->IsPopup()]);
         // Chromium's own windows have no CEF browser view; go through the page's view to its window,
-        // once Chromium has put it on screen.
-        CefRefPtr<CefBrowser> keep = browser;
+        // once Chromium has put it on screen and the page has an address.
+        AdoptOrFloat(browser, 0);
+    }
+
+    /// A tab (chrome.tabs.create: Chromium's tabbed browser window) becomes an ordinary Plinth page.
+    /// Anything else (a popup or sign-in window) keeps its window, floating over Plinth.
+    static void AdoptOrFloat(CefRefPtr<CefBrowser> browser, int attempt) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            id handle = (__bridge id)keep->GetHost()->GetWindowHandle();
+            id handle = (__bridge id)browser->GetHost()->GetWindowHandle();
             NSWindow *ns = [handle isKindOfClass:NSWindow.class] ? handle : [(NSView *)handle window];
-            if (ns) FloatWindowOverPlinth(ns, NSMakeSize(ns.frame.size.width, ns.frame.size.height));
+            std::string url = browser->GetMainFrame()->GetURL().ToString();
+            NSString *address = [NSString stringWithUTF8String:url.c_str()];
+            BOOL known = address.length && ![address isEqualToString:@"about:blank"];
+            if (!ns || (!known && attempt < 12)) { AdoptOrFloat(browser, attempt + 1); return; }
+            BOOL isTabWindow = [NSStringFromClass(ns.class) containsString:@"BrowserNativeWidgetWindow"] && !browser->IsPopup();
+            if (isTabWindow && known && ![address hasPrefix:@"chrome://newtab"]) {
+                PLog(@"a tab Chromium opened becomes a Plinth page");
+                ns.alphaValue = 0;   // never flash Chrome's own tab strip
+                if (gStrayHandler) gStrayHandler(address);
+                browser->GetHost()->CloseBrowser(true);
+            } else {
+                FloatWindowOverPlinth(ns, NSMakeSize(ns.frame.size.width, ns.frame.size.height));
+            }
         });
     }
     IMPLEMENT_REFCOUNTING(StrayClient);

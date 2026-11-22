@@ -86,6 +86,11 @@ plist() {   # plist <path> <executable> <identifier> <is-helper>
   <key>NSCameraUsageDescription</key><string>Websites you allow can use the camera.</string>
   <key>NSMicrophoneUsageDescription</key><string>Websites you allow can use the microphone.</string>
   <key>NSLocationUsageDescription</key><string>Websites you allow can use your location.</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>Websites you allow can use your location.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>Plinth uses Bluetooth to sign in with a passkey from your phone or another nearby device, and for websites you allow to use Bluetooth devices.</string>
+  <key>NSBluetoothPeripheralUsageDescription</key><string>Plinth uses Bluetooth to sign in with a passkey from your phone or another nearby device.</string>
+  <key>NSLocalNetworkUsageDescription</key><string>Websites you allow, and casting to devices, can reach your local network.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Websites you allow can record audio.</string>
   <key>CFBundleURLTypes</key><array><dict>
     <key>CFBundleURLName</key><string>Web site URL</string>
     <key>CFBundleURLSchemes</key><array><string>http</string><string>https</string></array>

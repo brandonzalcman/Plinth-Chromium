@@ -55,6 +55,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     let overlay: OverlayWindow
     let chrome = WindowChrome()
     private var flyoutClose: DispatchWorkItem?
+    private var titleClickMonitor: Any?
     private var noticeTask: DispatchWorkItem?
     let isPrivate: Bool
     /// Pages currently placed under the hole, left to right.
@@ -109,8 +110,40 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         overlay.contentView = overlayRoot
         window.addChildWindow(overlay, ordered: .above)
         overlay.setFrame(overlayFrame, display: false)
+        // A double-click in the title area zooms (or minimises) the window, as the Mac setting says.
+        // SwiftUI covers the title bar here, so AppKit never sees those clicks on its own.
+        titleClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, event.clickCount == 2, event.window === self.window,
+                  self.isTitleArea(event.locationInWindow) else { return event }
+            self.titleBarDoubleClicked()
+            return nil
+        }
         observeStore()
         refreshContent()
+    }
+
+    /// The strip along the top that acts as a title bar: everything above the page, away from buttons.
+    func isTitleArea(_ point: NSPoint) -> Bool {
+        let height = window.contentView?.bounds.height ?? window.frame.height
+        guard point.y > height - 38 else { return false }
+        switch geometry.layout {
+        case .dock:
+            // The extensions button sits at the top right.
+            return point.x < (window.contentView?.bounds.width ?? 0) - 48
+        case .sidebar:
+            let column = geometry.sidebarColumnWidth
+            // Over the page's top margin, or the sidebar's header between the traffic lights and its buttons.
+            return point.x > column || (point.x > 76 && point.x < column - 130)
+        }
+    }
+
+    private func titleBarDoubleClicked() {
+        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+        switch action {
+        case "Minimize": window.performMiniaturize(nil)
+        case "None": break
+        default: window.performZoom(nil)
+        }
     }
 
     var geometry: ContentGeometry {
@@ -412,6 +445,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         if let card = resumeCardWindow { window.removeChildWindow(card); card.orderOut(nil) }
         window.removeChildWindow(overlay)
         overlay.orderOut(nil)
+        if let titleClickMonitor { NSEvent.removeMonitor(titleClickMonitor) }
+        titleClickMonitor = nil
         shown = []
         app.windowDidClose(windowID)
     }

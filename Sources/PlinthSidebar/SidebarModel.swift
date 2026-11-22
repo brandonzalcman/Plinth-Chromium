@@ -86,6 +86,8 @@ public struct SidebarModel: Equatable, Sendable {
         public var fade: FadeStage
         public var shortcut: Int?
         public var splitRole: SplitRole?
+        /// When the page was last used, for the sidebar's gradual fade.
+        public var lastUsed: Date = .distantPast
     }
 
     public init(pins: [PinSlot], sites: [SiteCard], selected: PageID?) {
@@ -130,7 +132,8 @@ public struct SidebarModel: Equatable, Sendable {
                                  fade: site.isKept ? .live : page.fade, shortcut: shortcuts[page.id],
                                  splitRole: split.flatMap { s in
                                      page.id == s.leading ? .leading : (page.id == s.trailing ? .trailing : nil)
-                                 })
+                                 },
+                                 lastUsed: page.usage.lastUsed)
                      },
                      isKept: site.isKept, isFolded: site.isFolded && site.pages.count > 1,
                      fade: site.isKept ? .live : site.fade)
@@ -163,6 +166,34 @@ public struct SidebarModel: Equatable, Sendable {
         public var isCurrent: Bool
         public var pageCount: Int
         public var id: Kind { kind }
+    }
+}
+
+/// How fresh a page looks in the sidebar: pages drift towards faint as they go unused, ahead of the
+/// store actually fading them, so the sidebar shows at a glance what you've been using.
+public enum Freshness {
+    /// Fully fresh for the first hour, then easing down to 0 at a day.
+    public static func value(lastUsed: Date, now: Date) -> Double {
+        let hours = now.timeIntervalSince(lastUsed) / 3600
+        guard hours > 1 else { return 1 }
+        let t = min((hours - 1) / 23, 1)
+        return 1 - t * t * (3 - 2 * t)   // smoothstep
+    }
+
+    /// Opacity for a page row: never below 0.5, so old pages stay readable.
+    public static func opacity(lastUsed: Date, now: Date, isCurrent: Bool, kept: Bool) -> Double {
+        if isCurrent || kept { return 1 }
+        return 0.5 + 0.5 * value(lastUsed: lastUsed, now: now)
+    }
+}
+
+/// A site's own colour when its icon has none to give (or hasn't loaded): a stable hue from its host,
+/// so a site keeps the same colour across launches and windows.
+public enum SiteTint {
+    public static func hue(for host: String) -> Double {
+        var hash: UInt64 = 1469598103934665603   // FNV-1a
+        for byte in host.lowercased().utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
+        return Double(hash % 360) / 360
     }
 }
 

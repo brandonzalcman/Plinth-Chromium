@@ -67,6 +67,9 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         let root = NSHostingView(rootView: WindowRoot(app: app, controller: self, chrome: chrome))
         root.frame = NSRect(origin: .zero, size: frame.size)
         root.autoresizingMask = [.width, .height]
+        // By default the hosting view turns its SwiftUI content's size into the window's min and max
+        // size, which locks the window. The window sizes the content, not the other way round.
+        root.sizingOptions = []
         window.contentView = root
         observeStore()
         refreshContent()

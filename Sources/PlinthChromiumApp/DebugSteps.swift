@@ -95,6 +95,8 @@ enum DebugSteps {
             for w in NSApp.windows where w.isVisible {
                 log("window \(type(of: w)) \(NSStringFromRect(w.frame)) parent=\(w.parent != nil) level=\(w.level.rawValue) style=\(w.styleMask.rawValue) shadow=\(w.hasShadow) opaque=\(w.isOpaque) content=\(NSStringFromRect(w.contentView?.frame ?? .zero))")
             }
+        case "settings":
+            app.showSettings()
         case "quit":
             NSApp.terminate(nil)
         default:

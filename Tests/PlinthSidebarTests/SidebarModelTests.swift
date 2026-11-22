@@ -154,4 +154,29 @@ struct Rig {
         #expect(SidebarIntent.movePinToFolder(site, folder: folder).action == .movePinToFolder(site, folder: folder))
         #expect(SidebarIntent.search.action == .openCommandBar)
     }
+
+    @Test func freshnessEasesFromAnHourToADay() {
+        let now = Date()
+        #expect(Freshness.value(lastUsed: now, now: now) == 1)
+        #expect(Freshness.value(lastUsed: now - 3000, now: now) == 1)
+        let mid = Freshness.value(lastUsed: now - 12 * 3600, now: now)
+        #expect(mid > 0.3 && mid < 0.7)
+        #expect(Freshness.value(lastUsed: now - 30 * 3600, now: now) == 0)
+        #expect(Freshness.opacity(lastUsed: .distantPast, now: now, isCurrent: false, kept: false) == 0.5)
+        #expect(Freshness.opacity(lastUsed: .distantPast, now: now, isCurrent: true, kept: false) == 1)
+        #expect(Freshness.opacity(lastUsed: .distantPast, now: now, isCurrent: false, kept: true) == 1)
+    }
+
+    @Test func pagesCarryWhenTheyWereLastUsed() {
+        let r = Rig()
+        r.open("https://example.com/")
+        let page = r.model.sites[0].pages[0]
+        #expect(abs(page.lastUsed.timeIntervalSinceNow) < 60)
+    }
+
+    @Test func siteTintIsStablePerHost() {
+        #expect(SiteTint.hue(for: "example.com") == SiteTint.hue(for: "EXAMPLE.com"))
+        #expect(SiteTint.hue(for: "example.com") != SiteTint.hue(for: "swift.org"))
+        #expect((0..<1).contains(SiteTint.hue(for: "a.com")))
+    }
 }

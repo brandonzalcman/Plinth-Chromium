@@ -1,7 +1,9 @@
 import AppKit
 import Observation
+import SwiftUI
 import PlinthCEF
 import PlinthModel
+import PlinthSidebar
 
 /// One Chromium browser per open page, keyed by the store's `PageID`. The CEF counterpart of the
 /// Mac app's `WebViewPool`: it reports what pages do and carries out what the store decides.
@@ -166,8 +168,42 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
 final class Favicons {
     private(set) var images: [SiteKey: NSImage] = [:]
     @ObservationIgnored private var requested = Set<String>()
+    @ObservationIgnored private var tints: [SiteKey: Color] = [:]
 
     func image(for key: SiteKey) -> NSImage? { images[key] }
+
+    /// The site's colour: the most saturated colour in its icon, or a stable hue from its host.
+    func tint(for key: SiteKey) -> Color {
+        if let cached = tints[key] { return cached }
+        let colour = images[key].flatMap(Self.dominantColour)
+            ?? Color(hue: SiteTint.hue(for: key.host), saturation: 0.55, brightness: 0.85)
+        if images[key] != nil { tints[key] = colour }
+        return colour
+    }
+
+    /// Averages an icon's colourful pixels, ignoring near-white, near-black, grey and transparent ones.
+    static func dominantColour(_ image: NSImage) -> Color? {
+        let side = 12
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        NSGraphicsContext.restoreGraphicsState()
+        var r = 0.0, g = 0.0, b = 0.0, weight = 0.0
+        for x in 0..<side { for y in 0..<side {
+            guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), c.alphaComponent > 0.5 else { continue }
+            let maxC = max(c.redComponent, c.greenComponent, c.blueComponent)
+            let minC = min(c.redComponent, c.greenComponent, c.blueComponent)
+            let saturation = maxC == 0 ? 0 : (maxC - minC) / maxC
+            guard saturation > 0.25, maxC > 0.2 else { continue }
+            let w = saturation * saturation
+            r += c.redComponent * w; g += c.greenComponent * w; b += c.blueComponent * w; weight += w
+        } }
+        guard weight > 0.5 else { return nil }
+        return Color(red: r / weight, green: g / weight, blue: b / weight)
+    }
 
     func fetch(_ url: URL, for key: SiteKey) {
         guard images[key] == nil, requested.insert(key.host + "|" + url.absoluteString).inserted else { return }

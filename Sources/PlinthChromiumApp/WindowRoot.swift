@@ -90,7 +90,10 @@ struct WindowRoot: View {
                         SidebarHost(app: app, controller: controller, chrome: chrome, collapsed: g.sidebarCollapsed)
                             .frame(width: g.sidebarColumnWidth, height: size.height)
                     }
-                    ProgressLine(app: app, controller: controller, frame: holes.first, accent: app.accent(scheme))
+                    // The sidebar shows loading on its Now card; the dock layout shows it along the page's top.
+                    if g.layout == .dock {
+                        ProgressLine(app: app, controller: controller, frame: holes.first, accent: app.accent(scheme))
+                    }
                 }
                 PanelLayer(app: app, controller: controller, chrome: chrome, size: size, geometry: g)
             }
@@ -108,7 +111,8 @@ struct Surface: View {
     let palette: ShellPalette
 
     var body: some View {
-        ZStack {
+        // Top-leading, so each hairline's offset is the hole's own position (not added to a centred one).
+        ZStack(alignment: .topLeading) {
             Rectangle().fill(palette.surface)
                 .mask {
                     Canvas { ctx, size in

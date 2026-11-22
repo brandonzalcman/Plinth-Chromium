@@ -147,6 +147,11 @@ public:
         commandLine->AppendSwitch("no-startup-window");
         commandLine->AppendSwitch("disable-session-crashed-bubble");
         commandLine->AppendSwitch("hide-crash-restore-bubble");
+        // Chrome's own split view draws an outline and shadow around page contents, which shows as a
+        // frame inside Plinth's page hole. Plinth has its own split view.
+        std::string disabled = commandLine->GetSwitchValue("disable-features").ToString();
+        disabled += disabled.empty() ? "SideBySide" : ",SideBySide";
+        commandLine->AppendSwitchWithValue("disable-features", disabled);
         if (gUnpackedExtensions.count) {
             commandLine->AppendSwitchWithValue("load-extension",
                                                CefFromNSString([gUnpackedExtensions componentsJoinedByString:@","]));

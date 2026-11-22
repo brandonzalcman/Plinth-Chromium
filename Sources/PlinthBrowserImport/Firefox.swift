@@ -65,6 +65,7 @@ enum FirefoxReader {
             var out: [ImportedVisit] = []
             try query(db, """
                 SELECT p.url, p.title, v.visit_date FROM moz_historyvisits v JOIN moz_places p ON p.id = v.place_id
+                WHERE (p.url LIKE 'http://%' OR p.url LIKE 'https://%')
                 ORDER BY v.visit_date DESC LIMIT \(limit)
                 """, source: source, what: "history") { row in
                 guard let url = httpURL(text(row, 0)) else { return }

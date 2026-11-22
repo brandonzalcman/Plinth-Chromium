@@ -58,6 +58,7 @@ enum ChromiumReader {
                     var visits: [ImportedVisit] = []
                     try query(db, """
                         SELECT u.url, u.title, v.visit_time FROM visits v JOIN urls u ON u.id = v.url
+                        WHERE (u.url LIKE 'http://%' OR u.url LIKE 'https://%')
                         ORDER BY v.visit_time DESC LIMIT \(limit)
                         """, source: source, what: "history") { row in
                         guard let url = httpURL(text(row, 0)) else { return }

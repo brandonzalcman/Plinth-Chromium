@@ -51,6 +51,7 @@ enum SafariReader {
             var out: [ImportedVisit] = []
             try query(db, """
                 SELECT i.url, v.title, v.visit_time FROM history_visits v JOIN history_items i ON i.id = v.history_item
+                WHERE (i.url LIKE 'http://%' OR i.url LIKE 'https://%')
                 ORDER BY v.visit_time DESC LIMIT \(limit)
                 """, source: .safari, what: "history") { row in
                 guard let url = httpURL(text(row, 0)) else { return }

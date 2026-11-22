@@ -100,3 +100,49 @@ import PlinthStore
         #expect(report.notes.contains { $0.hasPrefix("Bookmarks weren't imported.") })
     }
 }
+
+@Suite struct SafariHistoryTests {
+    @Test func historyIsNewestFirstAndSkipsNonWebAddresses() throws {
+        let home = FakeHome()
+        let folder = home.root(.safari)
+        home.dir(folder)
+        // Safari stores visit times as seconds since 2001 (the reference date).
+        makeSQLite(folder.appendingPathComponent("History.db"), [
+            "CREATE TABLE history_items (id INTEGER PRIMARY KEY, url TEXT)",
+            "CREATE TABLE history_visits (id INTEGER PRIMARY KEY, history_item INTEGER, title TEXT, visit_time REAL)",
+            "INSERT INTO history_items VALUES (1, 'https://apple.com/'), (2, 'https://swift.org/blog'), (3, 'file:///etc/hosts')",
+            "INSERT INTO history_visits VALUES (1, 1, 'Apple', 700000000), (2, 2, 'Swift blog', 700000500), (3, 3, 'Hosts', 700000900)",
+        ])
+        let visits = try SafariReader.history(home: home.url, limit: 10)
+        #expect(visits.map(\.title) == ["Swift blog", "Apple"])
+        #expect(visits[1].date == Date(timeIntervalSinceReferenceDate: 700000000))
+        #expect(try SafariReader.history(home: home.url, limit: 1).count == 1)
+    }
+
+    @Test func noSafariHistoryIsReportedNotThrownAway() {
+        do {
+            _ = try SafariReader.history(home: FakeHome().url, limit: 10)
+            Issue.record("expected a failure")
+        } catch {
+            #expect(error.kind == .notFound || error.kind == .permissionDenied)
+        }
+    }
+}
+
+/// Each browser's newest-N history is the newest N *web* visits: other addresses are filtered before the limit.
+@Suite struct HistoryLimitTests {
+    @Test func chromiumLimitCountsOnlyWebVisits() throws {
+        let home = FakeHome()
+        writeChromiumHistory(home.root(.chrome).appendingPathComponent("Default"),
+                             [("https://old.example/", "Old", 1_700_000_000),
+                              ("chrome://settings/", "Settings", 1_700_000_900)])
+        #expect(try ChromiumReader.history(.chrome, home: home.url, limit: 1).map(\.title) == ["Old"])
+    }
+
+    @Test func firefoxLimitCountsOnlyWebVisits() throws {
+        let home = FakeHome()
+        writePlaces(home.root(.firefox).appendingPathComponent("Profiles/abc.default-release"), bookmarks: [],
+                    visits: [("https://old.example/", "Old", 1_700_000_000), ("about:config", "Config", 1_700_000_900)])
+        #expect(try FirefoxReader.history(.firefox, home: home.url, limit: 1).map(\.title) == ["Old"])
+    }
+}

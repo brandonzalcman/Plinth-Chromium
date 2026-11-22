@@ -10,6 +10,7 @@
 #include "include/cef_application_mac.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
+#include "include/cef_cookie.h"
 #include "include/cef_id_mappers.h"
 #include "include/cef_request_context.h"
 #include "include/cef_version_info.h"
@@ -17,7 +18,9 @@
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_fill_layout.h"
 #include "include/views/cef_window.h"
+#include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_library_loader.h"
+#include "include/base/cef_callback.h"
 
 static NSString *NSStringFromCef(const CefString &s) {
     std::string utf8 = s.ToString();
@@ -39,12 +42,35 @@ static CefRect CefRectFromScreenRect(NSRect r) {
                    (int)r.size.height);
 }
 
+static void PLog(NSString *message) {
+    if (getenv("PLINTH_CEF_LOG")) fprintf(stderr, "[cef] %s\n", message.UTF8String);
+}
+
 static int gLiveBrowsers = 0;
 static bool gQuitWhenClosed = false;
 
+/// Ends the run loop. CefQuitMessageLoop alone does not always return from CefRunMessageLoop with the
+/// Chrome bootstrap (Chromium may still hold keep-alives), so AppKit's loop is stopped as a fallback.
+static bool gForcedStop = false;
+
+static void QuitLoop() {
+    // Write cookies to disk now, in case the loop has to be forced to stop below.
+    CefCookieManager::GetGlobalManager(nullptr)->FlushStore(nullptr);
+    CefQuitMessageLoop();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        PLog(@"run loop still going; stopping AppKit's loop");
+        gForcedStop = true;
+        [NSApp stop:nil];
+        NSEvent *wake = [NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint modifierFlags:0
+                                          timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0];
+        [NSApp postEvent:wake atStart:YES];
+    });
+}
+
 static void NoteBrowserClosed() {
     gLiveBrowsers = std::max(0, gLiveBrowsers - 1);
-    if (gQuitWhenClosed && gLiveBrowsers == 0) CefQuitMessageLoop();
+    PLog([NSString stringWithFormat:@"browser closed, %d left, quitting=%d", gLiveBrowsers, gQuitWhenClosed]);
+    if (gQuitWhenClosed && gLiveBrowsers == 0) QuitLoop();
 }
 
 // MARK: - Application
@@ -70,13 +96,45 @@ static void NoteBrowserClosed() {
 
 // MARK: - Runtime
 
+static NSArray<NSString *> *gUnpackedExtensions = @[];
+static void (^gStrayHandler)(NSString *) = nil;
+
+
+
 namespace {
+
+/// The client Chromium uses for browsers it opens by itself. Plinth closes them at once and opens
+/// their address as a Plinth page instead.
+class StrayClient : public CefClient, public CefLifeSpanHandler, public CefDisplayHandler {
+public:
+    CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        PLog(@"closing a browser Chromium opened by itself");
+        CefRefPtr<CefBrowser> keep = browser;
+        // Its address arrives with the first navigation; give it a moment, then close it.
+        CefPostDelayedTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> b) {
+            std::string url = b->GetMainFrame()->GetURL().ToString();
+            NSString *address = [NSString stringWithUTF8String:url.c_str()];
+            if (gStrayHandler && address.length && ![address hasPrefix:@"chrome://newtab"] &&
+                ![address isEqualToString:@"about:blank"]) {
+                gStrayHandler(address);
+            }
+            b->GetHost()->CloseBrowser(true);
+        }, keep), 300);
+    }
+    IMPLEMENT_REFCOUNTING(StrayClient);
+};
 
 class PlinthCefApp : public CefApp, public CefBrowserProcessHandler {
 public:
     explicit PlinthCefApp(bool mockKeychain) : mockKeychain_(mockKeychain) {}
 
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+    CefRefPtr<CefClient> GetDefaultClient() override {
+        if (!strayClient_) strayClient_ = new StrayClient();
+        return strayClient_;
+    }
 
     void OnBeforeCommandLineProcessing(const CefString &processType, CefRefPtr<CefCommandLine> commandLine) override {
         if (!processType.empty()) return;
@@ -85,10 +143,19 @@ public:
         // Plinth draws its own tab UI; Chrome's first-run and default-browser prompts don't apply.
         commandLine->AppendSwitch("no-first-run");
         commandLine->AppendSwitch("no-default-browser-check");
+        // Every Chromium window belongs to a Plinth page; Chromium must not open or restore its own.
+        commandLine->AppendSwitch("no-startup-window");
+        commandLine->AppendSwitch("disable-session-crashed-bubble");
+        commandLine->AppendSwitch("hide-crash-restore-bubble");
+        if (gUnpackedExtensions.count) {
+            commandLine->AppendSwitchWithValue("load-extension",
+                                               CefFromNSString([gUnpackedExtensions componentsJoinedByString:@","]));
+        }
     }
 
 private:
     bool mockKeychain_;
+    CefRefPtr<CefClient> strayClient_;
     IMPLEMENT_REFCOUNTING(PlinthCefApp);
 };
 
@@ -97,6 +164,12 @@ CefScopedLibraryLoader *gLoader = nullptr;
 } // namespace
 
 @implementation PCEFRuntime
+
++ (NSArray<NSString *> *)unpackedExtensions { return gUnpackedExtensions; }
++ (void (^)(NSString *))strayBrowserHandler { return gStrayHandler; }
++ (void)setStrayBrowserHandler:(void (^)(NSString *))handler { gStrayHandler = [handler copy]; }
++ (void)log:(NSString *)message { PLog(message); }
++ (void)setUnpackedExtensions:(NSArray<NSString *> *)paths { gUnpackedExtensions = [paths copy] ?: @[]; }
 
 + (BOOL)startWithCachePath:(NSString *)cachePath mockKeychain:(BOOL)mockKeychain {
     gLoader = new CefScopedLibraryLoader();
@@ -119,12 +192,17 @@ CefScopedLibraryLoader *gLoader = nullptr;
 + (void)quitMessageLoop { CefQuitMessageLoop(); }
 
 + (void)quitAfterBrowsersClose {
+    PLog([NSString stringWithFormat:@"quit requested, %d browsers open", gLiveBrowsers]);
     gQuitWhenClosed = true;
-    if (gLiveBrowsers == 0) CefQuitMessageLoop();
+    if (gLiveBrowsers == 0) QuitLoop();
 }
 
++ (BOOL)loopWasForcedToStop { return gForcedStop; }
+
 + (void)shutdown {
+    PLog(@"shutting down");
     CefShutdown();
+    PLog(@"shut down");
     delete gLoader;
     gLoader = nullptr;
 }
@@ -293,6 +371,15 @@ public:
     }
 
     // Request
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                        bool userGesture, bool isRedirect) override {
+        if (!frame->IsMain()) return false;
+        bool linkClick = (request->GetTransitionType() & TT_SOURCE_MASK) == TT_LINK && userGesture;
+        PCEFBrowser *owner = owner_;
+        BOOL allow = [owner.delegate browser:owner shouldNavigateTo:NSStringFromCef(request->GetURL())
+                                    linkClick:linkClick isRedirect:isRedirect];
+        return !allow;
+    }
     bool OnOpenURLFromTab(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, const CefString &targetURL,
                           WindowOpenDisposition disposition, bool userGesture) override {
         if (disposition == CEF_WOD_CURRENT_TAB) return false;
@@ -461,8 +548,8 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
 - (void)_hostActivated { [self.delegate browserDidActivate:self]; }
 
 - (BOOL)_hostCanClose {
-    // Only Plinth closes a page's window, and only through -close.
-    return _closed && !_browser;
+    // Only Plinth closes a page's window, and only through -close (which then closes the browser too).
+    return _closed;
 }
 
 - (void)attachBelow:(NSWindow *)parent frame:(NSRect)frame {
@@ -479,6 +566,16 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
     if (!_host->IsVisible()) _host->Show();
     if (ns.parentWindow != parent) [parent addChildWindow:ns ordered:NSWindowBelow];
     [ns orderWindow:NSWindowBelow relativeTo:parent.windowNumber];
+}
+
+- (void)attachAbove:(NSWindow *)parent frame:(NSRect)frame {
+    if (!_host || !_hostWindow) return;
+    NSWindow *ns = _hostWindow;
+    if (ns.parentWindow && ns.parentWindow != parent) [ns.parentWindow removeChildWindow:ns];
+    _host->SetBounds(CefRectFromScreenRect(frame));
+    if (!_host->IsVisible()) _host->Show();
+    if (ns.parentWindow != parent) [parent addChildWindow:ns ordered:NSWindowAbove];
+    ns.hasShadow = YES;
 }
 
 - (void)focus {
@@ -543,6 +640,7 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
 - (void)close {
     if (_closed) return;
     _closed = YES;
+    PLog([NSString stringWithFormat:@"close browser created=%d host=%d", _browser != nullptr, _host != nullptr]);
     if (_browser) {
         _browser->GetHost()->CloseBrowser(true);
     } else {

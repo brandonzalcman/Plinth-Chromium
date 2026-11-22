@@ -57,7 +57,7 @@ let package = Package(
         ),
         .executableTarget(name: "PlinthChromium", dependencies: ["PlinthChromiumApp"], swiftSettings: ui),
 
-        .testTarget(name: "PlinthSidebarTests", dependencies: ["PlinthSidebar", .product(name: "PlinthCore", package: "Plinth")]),
+        .testTarget(name: "PlinthSidebarTests", dependencies: ["PlinthSidebar", .product(name: "PlinthCore", package: "Plinth"), .product(name: "PlinthMacUI", package: "Plinth")]),
         .testTarget(name: "PlinthExtensionsTests", dependencies: ["PlinthExtensions"]),
         .testTarget(name: "PlinthChromiumAppTests", dependencies: ["PlinthChromiumApp", .product(name: "PlinthCore", package: "Plinth")]),
     ],

@@ -1,3 +1,3 @@
 import PlinthChromiumApp
 
-MainActor.assumeIsolated { Spike.main() }
+MainActor.assumeIsolated { ChromiumApp.main() }

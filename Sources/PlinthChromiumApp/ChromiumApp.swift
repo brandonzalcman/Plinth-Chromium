@@ -1,0 +1,433 @@
+import AppKit
+import Observation
+import SwiftUI
+import PlinthCEF
+import PlinthExtensions
+import PlinthFade
+import PlinthLayout
+import PlinthModel
+import PlinthRules
+import PlinthSettings
+import PlinthSidebar
+import PlinthStore
+
+/// Owns the store, the page pool and the windows, and connects them. One per process.
+/// The Chromium counterpart of the Mac app's `AppController`: same store, same rules, same actions.
+@MainActor
+@Observable
+public final class ChromiumApp: NSObject, NSApplicationDelegate {
+    public private(set) static var shared: ChromiumApp!
+
+    @ObservationIgnored let identity = SiteIdentity()
+    @ObservationIgnored var resolver = AddressResolver()
+    @ObservationIgnored let layoutEngine = BarLayoutEngine()
+    @ObservationIgnored lazy var pinPolicy = PinLinkPolicy(identity: identity)
+    @ObservationIgnored private(set) var settings: SettingsStore!
+    @ObservationIgnored private(set) var prefs: ShellPreferencesStore!
+    @ObservationIgnored private(set) var store: BrowserStore!
+    @ObservationIgnored private(set) var pool: PagePool!
+    @ObservationIgnored private(set) var extensions: ExtensionsController!
+    @ObservationIgnored private(set) var storageDirectory: URL!
+    @ObservationIgnored var settingsWindow: NSWindow?
+
+    /// Bumped whenever a page's loading state changes, so the chrome redraws its buttons and progress.
+    var loadingTick = 0
+    /// The accent choice, observed so the chrome follows a change in Settings.
+    var accentChoice = AccentChoice.blue
+
+    @ObservationIgnored private var controllers: [WindowID: BrowserWindowController] = [:]
+    @ObservationIgnored private var privateProfiles: [WindowID: PCEFProfile] = [:]
+    @ObservationIgnored private var lastMainWindowID: WindowID?
+    @ObservationIgnored private var fadeTimer: Timer?
+    @ObservationIgnored private var dwellTimer: Timer?
+    @ObservationIgnored private let dwellInterval: TimeInterval = 5
+    @ObservationIgnored private var pendingOpenURLs: [URL] = []
+    @ObservationIgnored private var didFinishLaunching = false
+
+    // MARK: Entry point
+
+    /// Starts Chromium and runs the app. Called from the executable's main.swift.
+    public static func main() {
+        let application = PCEFApplication.shared as! PCEFApplication
+        let env = ProcessInfo.processInfo.environment
+        let support = Self.storageDirectory(env)
+        try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        if let paths = env["PLINTH_LOAD_EXTENSION"] {
+            PCEFRuntime.unpackedExtensions = paths.split(separator: ",").map(String.init)
+        }
+        let cefRoot = support.appendingPathComponent("Chromium", isDirectory: true).path
+        // Plinth keeps its own session (state.json). Chromium's would reopen its windows behind Plinth's.
+        try? FileManager.default.removeItem(atPath: cefRoot + "/Default/Sessions")
+        // Test profiles (PLINTH_STORAGE) skip the Keychain prompt for Chromium's cookie key.
+        guard PCEFRuntime.start(withCachePath: cefRoot, mockKeychain: env["PLINTH_STORAGE"] != nil) else {
+            let alert = NSAlert()
+            alert.messageText = "Plinth couldn’t start Chromium."
+            alert.informativeText = "The Chromium Embedded Framework is missing or damaged. Reinstall Plinth."
+            alert.runModal()
+            exit(1)
+        }
+        let app = ChromiumApp(storage: support)
+        shared = app
+        application.delegate = app
+        application.terminateHandler = { [weak app] in app?.terminate() }
+        PCEFRuntime.strayBrowserHandler = { url in
+            MainActor.assumeIsolated {
+                guard let app = ChromiumApp.shared, app.store != nil, let target = URL(string: url) else { return }
+                app.openInNewPage(target)
+            }
+        }
+        PCEFRuntime.runMessageLoop()
+        PCEFRuntime.log("message loop ended")
+        if !PCEFRuntime.loopWasForcedToStop { PCEFRuntime.shutdown() }
+        exit(0)
+    }
+
+    static func storageDirectory(_ env: [String: String]) -> URL {
+        if let path = env["PLINTH_STORAGE"] { return URL(fileURLWithPath: path, isDirectory: true) }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Plinth Chromium", isDirectory: true)
+    }
+
+    init(storage: URL) {
+        storageDirectory = storage
+        super.init()
+    }
+
+    /// The Chromium profile folder for the shared profile (extensions live here).
+    var chromiumProfileDirectory: URL { storageDirectory.appendingPathComponent("Chromium/Default", isDirectory: true) }
+
+    // MARK: Launch
+
+    public func applicationDidFinishLaunching(_ notification: Notification) {
+        let env = ProcessInfo.processInfo.environment
+        settings = SettingsStore(storageDirectory: storageDirectory)
+        prefs = ShellPreferencesStore(directory: storageDirectory)
+        if let layout = env["PLINTH_LAYOUT"].flatMap(TabLayout.init(rawValue:)) { prefs.update { $0.tabLayout = layout } }
+        NSApp.appearance = Self.appearance(settings.value.appearance)
+        resolver.engine = settings.value.searchEngine
+        accentChoice = settings.value.accent
+        store = BrowserStore(identity: identity, namer: PageNamer(), fader: Self.fader(for: settings.value.fadeBehavior),
+                             storageDirectory: storageDirectory)
+        pool = PagePool(siteKey: { [identity] in identity.key(for: $0) })
+        extensions = ExtensionsController(app: self, profileDirectory: chromiumProfileDirectory)
+        connect()
+        settings.observe { [weak self] old, new in self?.settingsDidChange(from: old, to: new) }
+        prefs.observe { [weak self] old, new in
+            guard let self, old.tabLayout != new.tabLayout || old.sidebarCollapsed != new.sidebarCollapsed else { return }
+            for c in self.controllers.values { c.refreshContent() }
+        }
+        NSApp.mainMenu = MainMenu.build(app: self)
+
+        scheduleFade()
+        if store.windows.isEmpty { store.createWindow() }
+        if let list = env["PLINTH_OPEN"], let first = store.windows.first?.id {
+            for text in list.split(separator: ",") {
+                if let url = URL(string: text.trimmingCharacters(in: .whitespaces)) { store.openPage(url: url, in: first) }
+            }
+        }
+        for window in store.windows where !window.isPrivate { showController(for: window.id) }
+        NSApp.activate()
+        dwellTimer = Timer.scheduledTimer(withTimeInterval: dwellInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.recordDwell() }
+        }
+        didFinishLaunching = true
+        let early = pendingOpenURLs
+        pendingOpenURLs = []
+        for url in early { openFromOtherApp(url) }
+        DebugSteps.runIfRequested(self)
+    }
+
+    static func fader(for behavior: FadeBehavior) -> FadeEngine {
+        FadeEngine(policy: FadePolicy.standard.scaled(by: behavior.lifetimeScale))
+    }
+
+    static func appearance(_ choice: AppearanceChoice) -> NSAppearance? {
+        switch choice {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+
+    func accent(_ scheme: ColorScheme) -> Color {
+        let c = accentChoice.rgb
+        // The deepest brand colours lift a little on a dark surface so the current page still reads.
+        let lift = scheme == .dark && (accentChoice == .midnight || accentChoice == .mono) ? 0.35 : 0
+        func mix(_ v: Double) -> Double { v / 255 + (1 - v / 255) * lift }
+        return Color(red: mix(c.r), green: mix(c.g), blue: mix(c.b))
+    }
+
+    private func settingsDidChange(from old: AppSettings, to new: AppSettings) {
+        if old.searchEngine != new.searchEngine { resolver.engine = new.searchEngine }
+        if old.appearance != new.appearance { NSApp.appearance = Self.appearance(new.appearance) }
+        if old.accent != new.accent { accentChoice = new.accent }
+        if old.fadeBehavior != new.fadeBehavior {
+            store.setFader(Self.fader(for: new.fadeBehavior))
+            scheduleFade()
+        }
+    }
+
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            if let existing = store.windows.first(where: { controllers[$0.id] == nil && !$0.isPrivate }) {
+                showController(for: existing.id)
+            } else {
+                newWindow()
+            }
+        }
+        return true
+    }
+
+    public func applicationDidBecomeActive(_ notification: Notification) { if store != nil { scheduleFade() } }
+
+    public func application(_ application: NSApplication, open urls: [URL]) {
+        guard didFinishLaunching else { pendingOpenURLs.append(contentsOf: urls); return }
+        urls.forEach(openFromOtherApp)
+    }
+
+    private func openFromOtherApp(_ url: URL) {
+        guard let id = keyWindowID ?? store.windows.first(where: { !$0.isPrivate })?.id else { return }
+        store.openPage(url: url, in: id)
+        controllers[id]?.window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Quit: save, close every page, and let Chromium wind down before the process exits.
+    func terminate() {
+        PCEFRuntime.log("terminate: \(pool.allBrowsers.count) pages open")
+        for c in controllers.values { c.saveFrame() }
+        store.flush()
+        extensions.closePopup()
+        // Closing for quit keeps every page in the store for next launch.
+        pool.closeAll()
+        PCEFRuntime.quitAfterBrowsersClose()
+    }
+
+    // MARK: Store <-> pages
+
+    private func connect() {
+        store.onEvent = { [weak self] event in self?.handle(event) }
+        pool.profileForPage = { [weak self] id in
+            guard let self, let window = self.store.windowID(containing: id), self.store.isPrivate(window: window) else {
+                return .shared
+            }
+            if let profile = self.privateProfiles[window] { return profile }
+            let profile = PCEFProfile.makePrivate()
+            self.privateProfiles[window] = profile
+            return profile
+        }
+        pool.callbacks.didUpdate = { [weak self] id, url, title in
+            self?.store.pageDidUpdate(id, url: url, title: title, siteNameHint: nil)
+        }
+        pool.callbacks.openRequest = { [weak self] url, opener, background in
+            guard let self, let window = self.store.windowID(containing: opener) ?? self.windowShowing(opener) ?? self.keyWindowID
+            else { return }
+            self.store.openPage(url: url, in: window, select: !background, opener: opener)
+        }
+        pool.callbacks.shouldNavigate = { [weak self] id, url, linkClick in
+            guard let self else { return true }
+            // A link clicked inside a pin that leaves the pin's site opens as an ordinary page.
+            guard linkClick, let pin = self.store.pins.first(where: { $0.page.id == id }),
+                  let source = self.store.page(id)?.url,
+                  self.pinPolicy.shouldDivert(NavigationRequest(url: url, kind: .linkClick, sourceURL: source), pinKey: pin.key)
+            else { return true }
+            if let window = self.windowShowing(id) ?? self.keyWindowID {
+                self.store.openPage(url: url, in: window, select: true, opener: nil)
+            }
+            return false
+        }
+        pool.callbacks.loadingChanged = { [weak self] _ in self?.loadingTick &+= 1 }
+        pool.callbacks.fullscreenChanged = { [weak self] id, fullscreen in
+            guard let self, let window = self.windowShowing(id) else { return }
+            self.controllers[window]?.setChromeHidden(fullscreen)
+        }
+        pool.callbacks.didClose = { [weak self] id in self?.store.closePage(id) }
+        pool.callbacks.hostReady = { [weak self] id in
+            for c in self?.controllers.values ?? [:].values { c.hostReady(id) }
+        }
+        pool.callbacks.activated = { [weak self] id in
+            if let window = self?.windowShowing(id) { self?.lastMainWindowID = window }
+        }
+        pool.callbacks.keyEquivalent = { event in NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false }
+    }
+
+    /// The window whose bar shows this page right now (pins appear in every window).
+    private func windowShowing(_ page: PageID) -> WindowID? {
+        if let id = store.windowID(containing: page) { return id }
+        return controllers.first { $0.value.shown.contains(page) }?.key
+    }
+
+    private func handle(_ event: StoreEvent) {
+        switch event {
+        case .pageOpened(let id, _):
+            // Pages opened in the background start loading straight away, as on the Mac.
+            if let page = store.page(id) { pool.browser(for: page) }
+        case .pageClosed(let id):
+            pool.close(id)
+        case .pagesShelved(let ids, _):
+            pool.close(ids)
+        case .pagesRestored(let ids, _):
+            for id in ids { if let page = store.page(id) { pool.browser(for: page) } }
+        case .selectionChanged(let window):
+            controllers[window]?.refreshContent()
+        case .navigate(let id, let url):
+            if let page = store.page(id) {
+                let existed = pool.existing(id) != nil
+                pool.browser(for: page)
+                if existed { pool.load(url, in: id) }
+            }
+        }
+    }
+
+    // MARK: Windows
+
+    var keyWindowID: WindowID? {
+        if let key = NSApp.keyWindow ?? NSApp.mainWindow {
+            let top = key.parent ?? key
+            if let match = controllers.first(where: { $0.value.window === top }) { return match.key }
+        }
+        if let last = lastMainWindowID, controllers[last] != nil { return last }
+        return controllers.keys.first
+    }
+
+    var keyController: BrowserWindowController? { keyWindowID.flatMap { controllers[$0] } }
+    func controller(for id: WindowID) -> BrowserWindowController? { controllers[id] }
+    var allControllers: [BrowserWindowController] { Array(controllers.values) }
+
+    func mainWindowBecameKey(_ id: WindowID) { lastMainWindowID = id }
+
+    func showController(for id: WindowID) {
+        if let existing = controllers[id] { existing.window.makeKeyAndOrderFront(nil); return }
+        let controller = BrowserWindowController(app: self, windowID: id)
+        controllers[id] = controller
+        controller.window.makeKeyAndOrderFront(nil)
+        if store.window(id)?.selectedPageID == nil { controller.openCommandBar(newPage: true) }
+    }
+
+    func newWindow(isPrivate: Bool = false) {
+        showController(for: store.createWindow(isPrivate: isPrivate))
+    }
+
+    /// Closing the last window keeps its bar for next time; closing one of several puts its sites away.
+    /// A private window is always discarded, with its in-memory Chromium profile.
+    func windowDidClose(_ id: WindowID) {
+        controllers[id] = nil
+        if store.isPrivate(window: id) {
+            let pages = store.window(id)?.sites.flatMap { $0.pages.map(\.id) } ?? []
+            store.closeWindow(id)
+            pool.close(pages)
+            privateProfiles[id] = nil
+        } else if controllers.keys.contains(where: { !store.isPrivate(window: $0) }) {
+            store.closeWindow(id)
+        }
+    }
+
+    func openInNewPage(_ url: URL, in window: WindowID? = nil) {
+        guard let id = window ?? keyWindowID else { return }
+        store.openPage(url: url, in: id, select: true, opener: nil)
+    }
+
+    // MARK: Timers
+
+    func scheduleFade() {
+        fadeTimer?.invalidate()
+        let next = store.runFade()
+        let delay = min(max((next ?? .distantFuture).timeIntervalSinceNow, 30), 15 * 60)
+        fadeTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleFade() }
+        }
+    }
+
+    private func recordDwell() {
+        guard NSApp.isActive else { return }
+        store.noteCoOpen(seconds: dwellInterval)
+        guard let id = keyWindowID, let window = store.window(id) else { return }
+        for page in window.visiblePageIDs { store.recordDwell(page, seconds: dwellInterval) }
+    }
+
+    // MARK: Bar and sidebar actions
+
+    func handle(_ action: BarAction, in windowID: WindowID) {
+        guard let controller = controllers[windowID] else { return }
+        ActionRouter.handle(action, in: windowID, store: store, pages: pool, panels: controller)
+        controller.refreshContent()
+    }
+
+    // MARK: Menu actions
+
+    private func withSelectedPage(_ body: (PageID) -> Void) {
+        guard let id = keyWindowID, let page = store.window(id)?.selectedPageID else { return }
+        body(page)
+    }
+
+    private func withSelectedSite(_ body: (SiteID) -> Void) {
+        guard let id = keyWindowID, let window = store.window(id), let page = window.selectedPageID,
+              let site = window.site(containing: page) else { return }
+        body(site.id)
+    }
+
+    @objc func menuSettings(_ sender: Any?) { showSettings() }
+    @objc func menuNewWindow(_ sender: Any?) { newWindow() }
+    @objc func menuNewPrivateWindow(_ sender: Any?) { newWindow(isPrivate: true) }
+    @objc func menuNewPage(_ sender: Any?) { keyController?.openCommandBar(newPage: true) }
+    @objc func menuOpenLocation(_ sender: Any?) { keyController?.openCommandBar(newPage: false) }
+    @objc func menuShelf(_ sender: Any?) { keyController?.toggleShelf() }
+    @objc func menuFind(_ sender: Any?) { keyController?.openFind() }
+    @objc func menuClosePage(_ sender: Any?) {
+        guard let id = keyWindowID, let controller = controllers[id] else { NSApp.keyWindow?.performClose(nil); return }
+        if controller.dismissPanel() { return }
+        if let page = store.window(id)?.selectedPageID, store.window(id)?.page(page) != nil {
+            store.closePage(page)
+        } else {
+            controller.window.performClose(nil)
+        }
+    }
+    @objc func menuCloseWindow(_ sender: Any?) { keyController?.window.performClose(nil) }
+    @objc func menuReopen(_ sender: Any?) { if let id = keyWindowID { store.reopenClosedPage(in: id) } }
+    @objc func menuNextPage(_ sender: Any?) { if let id = keyWindowID { store.selectAdjacent(offset: 1, in: id) } }
+    @objc func menuPreviousPage(_ sender: Any?) { if let id = keyWindowID { store.selectAdjacent(offset: -1, in: id) } }
+    @objc func menuSelectNumbered(_ sender: NSMenuItem) { if let id = keyWindowID { store.selectByShortcut(sender.tag, in: id) } }
+    @objc func menuReload(_ sender: Any?) { withSelectedPage { pool.reload($0) } }
+    @objc func menuBack(_ sender: Any?) { withSelectedPage { pool.goBack($0) } }
+    @objc func menuForward(_ sender: Any?) { withSelectedPage { pool.goForward($0) } }
+    @objc func menuZoomIn(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: 0.5) } }
+    @objc func menuZoomOut(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: -0.5) } }
+    @objc func menuZoomReset(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: 0) } }
+    @objc func menuKeepSite(_ sender: Any?) {
+        guard let id = keyWindowID, let window = store.window(id), let page = window.selectedPageID,
+              let site = window.site(containing: page) else { return }
+        store.setKept(site.id, !site.isKept)
+    }
+    @objc func menuPinSite(_ sender: Any?) { withSelectedSite { store.pin(site: $0) } }
+    @objc func menuPutAway(_ sender: Any?) { withSelectedSite { store.shelve(site: $0) } }
+    @objc func menuSplitWithNext(_ sender: Any?) {
+        guard let id = keyWindowID, let window = store.window(id), let page = window.selectedPageID else { return }
+        let order = BarOrder.pageOrder(pins: store.pins(in: id), sites: window.sites)
+        guard let i = order.firstIndex(of: page), order.count > 1 else { return }
+        store.split(page, with: order[(i + 1) % order.count], in: id)
+    }
+    @objc func menuEndSplit(_ sender: Any?) { if let id = keyWindowID { store.endSplit(in: id) } }
+    @objc func menuUseDock(_ sender: Any?) { prefs.update { $0.tabLayout = .dock } }
+    @objc func menuUseSidebar(_ sender: Any?) { prefs.update { $0.tabLayout = .sidebar } }
+    @objc func menuToggleSidebar(_ sender: Any?) {
+        if prefs.value.tabLayout == .dock { prefs.update { $0.tabLayout = .sidebar; $0.sidebarCollapsed = false } }
+        else { prefs.update { $0.sidebarCollapsed.toggle() } }
+    }
+    @objc func menuManageExtensions(_ sender: Any?) { openInNewPage(URL(string: "chrome://extensions")!) }
+    @objc func menuGetExtensions(_ sender: Any?) { openInNewPage(URL(string: "https://chromewebstore.google.com/category/extensions")!) }
+    @objc func menuDownloads(_ sender: Any?) { openInNewPage(URL(string: "chrome://downloads")!) }
+    @objc func menuHistory(_ sender: Any?) { openInNewPage(URL(string: "chrome://history")!) }
+    @objc func menuDevTools(_ sender: Any?) { withSelectedPage { pool.existing($0)?.executeChromeCommand("IDC_DEV_TOOLS") } }
+}
+
+extension ChromiumApp: NSMenuItemValidation {
+    public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(menuUseDock(_:)): item.state = prefs.value.tabLayout == .dock ? .on : .off
+        case #selector(menuUseSidebar(_:)): item.state = prefs.value.tabLayout == .sidebar ? .on : .off
+        default: break
+        }
+        return true
+    }
+}

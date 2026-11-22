@@ -61,7 +61,7 @@ final class ExtensionsController: NSObject, PCEFBrowserDelegate {
     func closePopup() {
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
-        popup?.attach(below: nil, frame: .zero)
+        popup?.attach(to: nil, frame: .zero, cornerRadius: 0)
         popup?.close()
         popup = nil
         popupPlacement = nil
@@ -73,7 +73,12 @@ final class ExtensionsController: NSObject, PCEFBrowserDelegate {
 
     func browserHostWindowReady(_ browser: PCEFBrowser) {
         guard browser === popup, let placement = popupPlacement else { return }
-        browser.attach(above: placement.parent, frame: placement.frame)
+        browser.attach(to: placement.parent, frame: placement.frame, cornerRadius: 12)
+        // Above the pages and the overlay, with a shadow like a popover.
+        if let host = browser.hostWindow {
+            host.hasShadow = true
+            host.order(.above, relativeTo: placement.parent.childWindows?.filter { $0 !== host }.last?.windowNumber ?? 0)
+        }
         browser.hostWindow?.makeKey()
         browser.focus()
     }

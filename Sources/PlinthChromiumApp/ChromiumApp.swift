@@ -27,6 +27,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored private(set) var store: BrowserStore!
     @ObservationIgnored private(set) var pool: PagePool!
     @ObservationIgnored private(set) var extensions: ExtensionsController!
+    @ObservationIgnored private(set) var downloads: DownloadsModel!
     @ObservationIgnored private(set) var storageDirectory: URL!
     @ObservationIgnored var settingsWindow: NSWindow?
 
@@ -109,7 +110,24 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         store = BrowserStore(identity: identity, namer: PageNamer(), fader: Self.fader(for: settings.value.fadeBehavior),
                              storageDirectory: storageDirectory)
         pool = PagePool(siteKey: { [identity] in identity.key(for: $0) })
+        pool.favicons.cacheDirectory = storageDirectory.appendingPathComponent("Favicons", isDirectory: true)
         extensions = ExtensionsController(app: self, profileDirectory: chromiumProfileDirectory)
+        downloads = DownloadsModel()
+        // A page opened straight onto a file has nothing to show once the file is down: close it then
+        // (closing it sooner stops the download), or it would fetch the file again every time it is restored.
+        downloads.onStopped = { [weak self] url in
+            guard let self else { return }
+            for window in self.store.windows {
+                for site in window.sites {
+                    for page in site.pages where page.url == url && !self.pool.canGoBack(page.id) {
+                        self.store.closePage(page.id)
+                    }
+                }
+            }
+        }
+        if let folder = env["PLINTH_DOWNLOADS"] ?? settings.value.downloadFolder, !folder.isEmpty {
+            PCEFRuntime.downloadsDirectory = folder
+        }
         connect()
         settings.observe { [weak self] old, new in self?.settingsDidChange(from: old, to: new) }
         prefs.observe { [weak self] old, new in
@@ -416,7 +434,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     }
     @objc func menuManageExtensions(_ sender: Any?) { openInNewPage(URL(string: "chrome://extensions")!) }
     @objc func menuGetExtensions(_ sender: Any?) { openInNewPage(URL(string: "https://chromewebstore.google.com/category/extensions")!) }
-    @objc func menuDownloads(_ sender: Any?) { openInNewPage(URL(string: "chrome://downloads")!) }
+    @objc func menuDownloads(_ sender: Any?) { keyController?.toggleDownloads() }
     @objc func menuHistory(_ sender: Any?) { openInNewPage(URL(string: "chrome://history")!) }
     @objc func menuDevTools(_ sender: Any?) { withSelectedPage { pool.existing($0)?.executeChromeCommand("IDC_DEV_TOOLS") } }
 }

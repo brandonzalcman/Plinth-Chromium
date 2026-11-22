@@ -9,6 +9,8 @@ public struct ShellPreferences: Codable, Equatable, Sendable {
     public var tabLayout: TabLayout = .dock
     /// The sidebar is shrunk to its icon rail.
     public var sidebarCollapsed = false
+    /// Pin folders the sidebar shows as a titled list of their pins rather than as one icon tile.
+    public var listFolders: Set<UUID> = []
 
     public init() {}
 
@@ -17,6 +19,7 @@ public struct ShellPreferences: Codable, Equatable, Sendable {
         // Unknown or missing values fall back to the defaults rather than failing the whole file.
         tabLayout = (try? c.decode(TabLayout.self, forKey: .tabLayout)) ?? .dock
         sidebarCollapsed = (try? c.decode(Bool.self, forKey: .sidebarCollapsed)) ?? false
+        listFolders = (try? c.decode(Set<UUID>.self, forKey: .listFolders)) ?? []
     }
 }
 

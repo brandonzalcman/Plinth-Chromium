@@ -3,6 +3,7 @@
 #import "PlinthCEF.h"
 
 #include <crt_externs.h>
+#include <map>
 #include <set>
 #include <string>
 
@@ -11,6 +12,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_cookie.h"
+#include "include/cef_download_handler.h"
 #include "include/cef_id_mappers.h"
 #include "include/cef_request_context.h"
 #include "include/cef_version_info.h"
@@ -73,6 +75,54 @@ static void NoteBrowserClosed() {
     if (gQuitWhenClosed && gLiveBrowsers == 0) QuitLoop();
 }
 
+// MARK: - Downloads
+
+@interface PCEFDownload ()
+@property (readwrite) uint32_t identifier;
+@property (readwrite, copy) NSString *url;
+@property (readwrite, copy) NSString *filename;
+@property (readwrite, copy) NSString *path;
+@property (readwrite) int64_t receivedBytes;
+@property (readwrite) int64_t totalBytes;
+@property (readwrite) int64_t bytesPerSecond;
+@property (readwrite) BOOL isInProgress;
+@property (readwrite) BOOL isComplete;
+@property (readwrite) BOOL isCanceled;
+@property (readwrite) BOOL isInterrupted;
+@end
+
+@implementation PCEFDownload
+@end
+
+static PCEFDownload *DownloadFrom(CefRefPtr<CefDownloadItem> item) {
+    PCEFDownload *d = [PCEFDownload new];
+    d.identifier = item->GetId();
+    d.url = NSStringFromCef(item->GetURL());
+    d.path = NSStringFromCef(item->GetFullPath());
+    NSString *name = d.path.length ? d.path.lastPathComponent : NSStringFromCef(item->GetSuggestedFileName());
+    d.filename = name.length ? name : @"Download";
+    d.receivedBytes = item->GetReceivedBytes();
+    d.totalBytes = item->GetTotalBytes() > 0 ? item->GetTotalBytes() : -1;
+    d.bytesPerSecond = item->GetCurrentSpeed();
+    d.isInProgress = item->IsInProgress();
+    d.isComplete = item->IsComplete();
+    d.isCanceled = item->IsCanceled();
+    d.isInterrupted = item->IsInterrupted();
+    return d;
+}
+
+/// A file name that doesn't overwrite one already in `folder`: "name (2).ext" and so on.
+static NSString *UniquePath(NSString *folder, NSString *name) {
+    NSString *base = name.stringByDeletingPathExtension, *ext = name.pathExtension;
+    NSString *path = [folder stringByAppendingPathComponent:name];
+    for (int n = 2; [NSFileManager.defaultManager fileExistsAtPath:path] && n < 1000; n++) {
+        NSString *candidate = [NSString stringWithFormat:@"%@ (%d)", base, n];
+        if (ext.length) candidate = [candidate stringByAppendingPathExtension:ext];
+        path = [folder stringByAppendingPathComponent:candidate];
+    }
+    return path;
+}
+
 // MARK: - Application
 
 @interface PCEFApplication () <CefAppProtocol> {
@@ -98,6 +148,9 @@ static void NoteBrowserClosed() {
 
 static NSArray<NSString *> *gUnpackedExtensions = @[];
 static void (^gStrayHandler)(NSString *) = nil;
+static void (^gDownloadHandler)(PCEFDownload *) = nil;
+static NSString *gDownloadsDirectory = nil;
+static std::map<uint32_t, CefRefPtr<CefDownloadItemCallback>> gDownloadCallbacks;
 
 
 
@@ -174,6 +227,16 @@ CefScopedLibraryLoader *gLoader = nullptr;
 + (void (^)(NSString *))strayBrowserHandler { return gStrayHandler; }
 + (void)setStrayBrowserHandler:(void (^)(NSString *))handler { gStrayHandler = [handler copy]; }
 + (void)log:(NSString *)message { PLog(message); }
++ (void (^)(PCEFDownload *))downloadHandler { return gDownloadHandler; }
++ (void)setDownloadHandler:(void (^)(PCEFDownload *))handler { gDownloadHandler = [handler copy]; }
++ (NSString *)downloadsDirectory {
+    return gDownloadsDirectory ?: [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES) firstObject];
+}
++ (void)setDownloadsDirectory:(NSString *)path { gDownloadsDirectory = [path copy]; }
++ (void)cancelDownload:(uint32_t)identifier {
+    auto it = gDownloadCallbacks.find(identifier);
+    if (it != gDownloadCallbacks.end()) it->second->Cancel();
+}
 + (void)setUnpackedExtensions:(NSArray<NSString *> *)paths { gUnpackedExtensions = [paths copy] ?: @[]; }
 
 + (BOOL)startWithCachePath:(NSString *)cachePath mockKeychain:(BOOL)mockKeychain {
@@ -229,6 +292,17 @@ CefScopedLibraryLoader *gLoader = nullptr;
 @property (readwrite, nullable) NSString *path;
 @end
 
+/// Profile preferences Plinth needs: Chromium's own download pop-up is off (Plinth shows downloads
+/// itself), and downloads never ask where to save.
+static void ApplyPlinthPreferences(CefRefPtr<CefRequestContext> context) {
+    CefString error;
+    for (const char *name : {"download_bubble.partial_view_enabled", "download.prompt_for_download"}) {
+        CefRefPtr<CefValue> value = CefValue::Create();
+        value->SetBool(false);
+        if (context->CanSetPreference(name)) context->SetPreference(name, value, error);
+    }
+}
+
 @implementation PCEFProfile
 
 + (PCEFProfile *)shared {
@@ -236,6 +310,7 @@ CefScopedLibraryLoader *gLoader = nullptr;
     if (!shared) {
         shared = [PCEFProfile new];
         shared->_context = CefRequestContext::GetGlobalContext();
+        ApplyPlinthPreferences(shared->_context);
         shared.path = NSStringFromCef(shared->_context->GetCachePath());
     }
     return shared;
@@ -245,6 +320,7 @@ CefScopedLibraryLoader *gLoader = nullptr;
     PCEFProfile *profile = [PCEFProfile new];
     CefRequestContextSettings settings;   // empty cache_path: in memory only
     profile->_context = CefRequestContext::CreateContext(settings, nullptr);
+    ApplyPlinthPreferences(profile->_context);
     profile.isPrivate = YES;
     return profile;
 }
@@ -311,7 +387,8 @@ class BrowserClient : public CefClient,
                       public CefLifeSpanHandler,
                       public CefRequestHandler,
                       public CefKeyboardHandler,
-                      public CefCommandHandler {
+                      public CefCommandHandler,
+                      public CefDownloadHandler {
 public:
     explicit BrowserClient(PCEFBrowser *owner) : owner_(owner) {}
 
@@ -321,6 +398,25 @@ public:
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
     CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+
+    // Downloads: saved straight into Plinth's folder and reported to the shell.
+    bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, const CefString &suggestedName,
+                          CefRefPtr<CefBeforeDownloadCallback> callback) override {
+        NSString *folder = gDownloadsDirectory.length ? gDownloadsDirectory
+            : [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES) firstObject];
+        [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *name = NSStringFromCef(suggestedName);
+        callback->Continue(CefFromNSString(UniquePath(folder, name.length ? name : @"Download")), false);
+        if (gDownloadHandler) gDownloadHandler(DownloadFrom(item));
+        return true;
+    }
+    void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item,
+                           CefRefPtr<CefDownloadItemCallback> callback) override {
+        if (item->IsInProgress()) gDownloadCallbacks[item->GetId()] = callback;
+        else gDownloadCallbacks.erase(item->GetId());
+        if (gDownloadHandler) gDownloadHandler(DownloadFrom(item));
+    }
 
     // Display
     void OnAddressChange(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, const CefString &url) override {
@@ -557,7 +653,7 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
     return _closed;
 }
 
-- (void)attachBelow:(NSWindow *)parent frame:(NSRect)frame {
+- (void)attachTo:(NSWindow *)parent frame:(NSRect)frame cornerRadius:(CGFloat)cornerRadius {
     if (!_host || !_hostWindow) return;
     NSWindow *ns = _hostWindow;
     if (!parent) {
@@ -567,20 +663,17 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
         return;
     }
     if (ns.parentWindow && ns.parentWindow != parent) [ns.parentWindow removeChildWindow:ns];
-    _host->SetBounds(CefRectFromScreenRect(frame));
-    if (!_host->IsVisible()) _host->Show();
-    if (ns.parentWindow != parent) [parent addChildWindow:ns ordered:NSWindowBelow];
-    [ns orderWindow:NSWindowBelow relativeTo:parent.windowNumber];
-}
-
-- (void)attachAbove:(NSWindow *)parent frame:(NSRect)frame {
-    if (!_host || !_hostWindow) return;
-    NSWindow *ns = _hostWindow;
-    if (ns.parentWindow && ns.parentWindow != parent) [ns.parentWindow removeChildWindow:ns];
+    // Rounded corners: a clear window whose content is clipped.
+    ns.opaque = NO;
+    ns.backgroundColor = NSColor.clearColor;
+    NSView *content = ns.contentView;
+    content.wantsLayer = YES;
+    content.layer.cornerRadius = cornerRadius;
+    content.layer.cornerCurve = kCACornerCurveContinuous;
+    content.layer.masksToBounds = cornerRadius > 0;
     _host->SetBounds(CefRectFromScreenRect(frame));
     if (!_host->IsVisible()) _host->Show();
     if (ns.parentWindow != parent) [parent addChildWindow:ns ordered:NSWindowAbove];
-    ns.hasShadow = YES;
 }
 
 - (void)focus {

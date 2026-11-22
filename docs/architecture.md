@@ -26,11 +26,15 @@ CEF has two hard limits on macOS that shape everything:
    multiple Chrome style BrowserViews"), so tabs can't be swapped inside one CEF window.
 
 So each Plinth page is a Chrome-style browser in its **own frameless CEF window**
-(`PCEFBrowser.hostWindow`). Plinth's own `NSWindow` draws the chrome (dock or sidebar, panels) on a
-transparent window and leaves a rounded **hole** where the page goes; the selected page's window is
-attached as a child window *below* it, filling the hole. Clicks on the transparent hole fall through
-to the page. Switching pages attaches a different child window; split view attaches two. Panels
-(command bar, shelf, find) are drawn by Plinth's window, so they float above the page naturally.
+(`PCEFBrowser.hostWindow`), clipped to rounded corners and attached as a child window *above* Plinth's
+own `NSWindow`, over the space the chrome leaves for it. Plinth's window draws the surface and the dock
+or sidebar; pages sit on top, so they get clicks and keys directly. (A first version put pages *below*
+a transparent hole in Plinth's window; macOS doesn't pass clicks through to them, so that was dropped.)
+
+What has to float over the page — the command bar, shelf, downloads tray, find bar and the collapsed
+sidebar's hover flyout — lives in a clear `OverlayWindow`, the topmost child, which ignores the mouse
+whenever nothing is showing in it. It starts below the title strip so the traffic lights stay usable.
+Switching pages attaches a different child window; split view attaches two.
 
 Visibility goes through Views (`CefWindow::Show/Hide`) so Chromium knows when a page is hidden.
 
@@ -80,12 +84,11 @@ each, dropped when the window closes.
 - **Quit doesn't end Chromium cleanly.** `CefQuitMessageLoop` doesn't return from the run loop with
   the Chrome bootstrap; Plinth flushes cookies, stops AppKit's loop and skips `CefShutdown` (which
   crashes in that state). Chromium may treat the next launch as after a crash.
-- **A faint Chromium hairline** sometimes shows over the page, from Chrome's own contents frame inside
-  the page window.
 - **Background pages restored from the last session load only when first shown.**
+- Downloads are Plinth's own (saved to the Downloads folder or the one in Settings, shown in the
+  dock's downloads button, the sidebar and the shared downloads tray); Chromium's download bubble is off.
 - Not ported yet from the Mac app: iCloud sync (needs the signed Xcode target and entitlements),
-  bookmarks UI, history and downloads panels (Chromium's own `chrome://history` and
-  `chrome://downloads` pages are used), passwords (Chromium's built-in manager runs instead; Plinth's
+  bookmarks UI, a history panel (Chromium's `chrome://history` is used), passwords (Chromium's built-in manager runs instead; Plinth's
   Apple Passwords import/export isn't wired in), Points & Levels, Ask / on-device AI summaries,
   the welcome guide, peek and mini windows, split-view divider dragging, page snapshots on the shelf,
   content blocking (use an extension for now), and drag-and-drop between windows.

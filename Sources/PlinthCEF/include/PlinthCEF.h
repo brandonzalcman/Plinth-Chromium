@@ -13,6 +13,23 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^terminateHandler)(void);
 @end
 
+/// A download Chromium is running or has finished, as last reported.
+@interface PCEFDownload : NSObject
+@property (readonly) uint32_t identifier;
+@property (readonly, copy) NSString *url;
+@property (readonly, copy) NSString *filename;
+/// Where the file is being written ("" until Chromium has decided).
+@property (readonly, copy) NSString *path;
+@property (readonly) int64_t receivedBytes;
+/// -1 when the server did not say.
+@property (readonly) int64_t totalBytes;
+@property (readonly) int64_t bytesPerSecond;
+@property (readonly) BOOL isInProgress;
+@property (readonly) BOOL isComplete;
+@property (readonly) BOOL isCanceled;
+@property (readonly) BOOL isInterrupted;
+@end
+
 /// Process-wide CEF lifetime.
 @interface PCEFRuntime : NSObject
 /// Loads the framework and initializes CEF. `cachePath` is the profile root on disk.
@@ -21,6 +38,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// chrome.tabs.create / chrome.windows.create. Plinth closes those and gets their address here,
 /// to open as an ordinary page instead.
 @property (class, copy, nullable) void (^strayBrowserHandler)(NSString *url);
+/// Every download update from any page. Plinth takes downloads over from Chromium's own UI
+/// (which is hidden) and saves them into `downloadsDirectory`.
+@property (class, copy, nullable) void (^downloadHandler)(PCEFDownload *download);
+/// Folder new downloads are saved to (~/Downloads unless set).
+@property (class, copy) NSString *downloadsDirectory;
++ (void)cancelDownload:(uint32_t)identifier;
 /// Logs lifecycle steps to stderr when PLINTH_CEF_LOG is set.
 + (void)log:(NSString *)message;
 /// Unpacked extension folders to load at startup (Chromium's --load-extension), for development and tests.
@@ -87,7 +110,7 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 ///
 /// CEF allows one Chrome-style browser view per window, and only Chrome style runs extensions, so each
 /// page gets its own borderless `hostWindow`. The shell attaches the selected page's host window as a
-/// child *below* its own window, which draws the chrome and leaves a transparent hole for the page.
+/// child above its own window, over the space its chrome leaves for the page.
 @interface PCEFBrowser : NSObject
 - (instancetype)initWithURL:(NSString *)url profile:(PCEFProfile *)profile
                    delegate:(id<PCEFBrowserDelegate>)delegate NS_DESIGNATED_INITIALIZER;
@@ -117,11 +140,10 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 - (BOOL)executeChromeCommand:(NSString *)name;
 /// Runs JavaScript in the main frame (fire and forget).
 - (void)executeJavaScript:(NSString *)script;
-/// Shows the page's window as a child below `parent`, filling `frame` (screen coordinates),
-/// or hides it when `parent` is nil.
-- (void)attachBelow:(nullable NSWindow *)parent frame:(NSRect)frame;
-/// Shows the page's window as a child above `parent` (for extension popups), filling `frame`.
-- (void)attachAbove:(NSWindow *)parent frame:(NSRect)frame;
+/// Shows the page's window as a child above `parent`, filling `frame` (screen coordinates) with its
+/// corners rounded to `cornerRadius`, or hides it when `parent` is nil. Pages sit above Plinth's
+/// window so they get clicks and keys directly.
+- (void)attachTo:(nullable NSWindow *)parent frame:(NSRect)frame cornerRadius:(CGFloat)cornerRadius;
 /// Gives the page keyboard focus.
 - (void)focus;
 /// Closes the browser for good. The delegate gets browserDidClose: when Chromium is done.

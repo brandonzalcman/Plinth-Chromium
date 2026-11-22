@@ -95,7 +95,6 @@ struct WindowRoot: View {
                         ProgressLine(app: app, controller: controller, frame: holes.first, accent: app.accent(scheme))
                     }
                 }
-                PanelLayer(app: app, controller: controller, chrome: chrome, size: size, geometry: g)
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         }
@@ -104,7 +103,7 @@ struct WindowRoot: View {
     }
 }
 
-/// The window's surface, everywhere except the page holes.
+/// The window's surface. The pages' own windows sit on top of it; a hairline frames each page.
 struct Surface: View {
     let holes: [CGRect]
     let radius: CGFloat
@@ -114,15 +113,6 @@ struct Surface: View {
         // Top-leading, so each hairline's offset is the hole's own position (not added to a centred one).
         ZStack(alignment: .topLeading) {
             Rectangle().fill(palette.surface)
-                .mask {
-                    Canvas { ctx, size in
-                        var path = Path(CGRect(origin: .zero, size: size))
-                        for hole in holes {
-                            path.addRoundedRect(in: hole, cornerSize: CGSize(width: radius, height: radius), style: .continuous)
-                        }
-                        ctx.fill(path, with: .color(.black), style: FillStyle(eoFill: true))
-                    }
-                }
             // A hairline and a soft shadow around each page, so it reads as a sheet lying on the surface.
             ForEach(Array(holes.enumerated()), id: \.offset) { _, hole in
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -222,6 +212,7 @@ struct DockHost: View {
             },
             accent: app.accent(scheme),
             icon: { app.pool.favicons.image(for: $0) },
+            downloads: app.downloads.list.barState,
             nav: nav,
             onAction: { app.handle($0, in: windowID) }
         )
@@ -265,7 +256,9 @@ struct PanelLayer: View {
                 )
                 .offset(x: centreX - size.width / 2)
                 .padding(.bottom, lift)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            .transition(.opacity)
         case .shelf:
             ZStack(alignment: .bottom) {
                 Dimmer { controller.dismissPanel() }
@@ -284,6 +277,20 @@ struct PanelLayer: View {
                 .offset(x: centreX - size.width / 2)
                 .padding(.bottom, lift)
             }
+        case .downloads:
+            // Under the downloads button: bottom right in the dock layout, beside the sidebar's foot otherwise.
+            ZStack(alignment: geometry.layout == .dock ? .bottomTrailing : .bottomLeading) {
+                Dimmer { controller.dismissPanel() }
+                let model = app.downloads!
+                DownloadsTrayView(items: model.list.items, accent: accent,
+                                  onOpen: { model.open($0) }, onReveal: { model.reveal($0) },
+                                  onCancel: { model.cancel($0) }, onRemove: { model.remove($0) },
+                                  onClear: { model.clear() }, onDismiss: { controller.dismissPanel() })
+                    .padding(geometry.layout == .dock ? .trailing : .leading,
+                             geometry.layout == .dock ? 120 : geometry.sidebarColumnWidth + 12)
+                    .padding(.bottom, geometry.layout == .dock ? lift : 12)
+                    .transition(.scale(scale: 0.96, anchor: .bottom).combined(with: .opacity))
+            }
         case .find:
             ZStack(alignment: .bottom) {
                 FindBarView(accent: accent, notFound: Binding(get: { chrome.findNotFound }, set: { chrome.findNotFound = $0 }),
@@ -294,6 +301,45 @@ struct PanelLayer: View {
             }
             .frame(width: size.width, height: size.height)
         }
+    }
+}
+
+/// What floats above the pages, in the overlay window: the panels, and the sidebar's hover flyout.
+struct OverlayRoot: View {
+    let app: ChromiumApp
+    let controller: BrowserWindowController
+    let chrome: WindowChrome
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = geo.size
+            let g = ContentGeometry(layout: app.prefs.value.tabLayout, sidebarCollapsed: app.prefs.value.sidebarCollapsed,
+                                    chromeHidden: chrome.chromeHidden)
+            ZStack(alignment: .topLeading) {
+                if chrome.flyoutOpen {
+                    // A click on the page side closes the flyout.
+                    Color.black.opacity(0.06)
+                        .contentShape(Rectangle())
+                        .onTapGesture { controller.closeFlyout(after: 0) }
+                        .transition(.opacity)
+                    SidebarHost(app: app, controller: controller, chrome: chrome, collapsed: false, inFlyout: true)
+                        .frame(width: ContentGeometry.sidebarWidth, height: size.height)
+                        .background(
+                            UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: 14,
+                                                   topTrailingRadius: 14, style: .continuous)
+                                .fill(ShellPalette(scheme, isPrivate: controller.isPrivate).surface)
+                                .shadow(color: .black.opacity(0.28), radius: 18, x: 6)
+                        )
+                        .onHover { inside in if inside { controller.openFlyout() } else { controller.closeFlyout() } }
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+                PanelLayer(app: app, controller: controller, chrome: chrome, size: size, geometry: g)
+            }
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+        }
+        .ignoresSafeArea()
+        .preferredColorScheme(controller.isPrivate ? .dark : nil)
     }
 }
 

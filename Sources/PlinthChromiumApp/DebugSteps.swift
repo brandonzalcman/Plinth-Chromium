@@ -92,9 +92,21 @@ enum DebugSteps {
             if let c = app.keyController {
                 log("parent \(NSStringFromRect(c.window.frame)) content \(NSStringFromRect(c.window.contentView?.frame ?? .zero)) attached \(c.chrome.attached.values.map { NSStringFromRect(c.window.convertToScreen($0)) })")
             }
+            if let c = app.keyController {
+                log("overlay \(NSStringFromRect(c.overlay.frame)) content \(NSStringFromRect(c.overlay.contentView?.frame ?? .zero)) ignores=\(c.overlay.ignoresMouseEvents) children=\(c.window.childWindows?.map { String(describing: type(of: $0)) } ?? [])")
+            }
             for w in NSApp.windows where w.isVisible {
                 log("window \(type(of: w)) \(NSStringFromRect(w.frame)) parent=\(w.parent != nil) level=\(w.level.rawValue) style=\(w.styleMask.rawValue) shadow=\(w.hasShadow) opaque=\(w.isOpaque) content=\(NSStringFromRect(w.contentView?.frame ?? .zero))")
             }
+        case "flyout":
+            app.keyController?.openFlyout()
+        case "unflyout":
+            app.keyController?.closeFlyout(after: 0)
+        case "listfolder":
+            if let folder = store.pins.compactMap(\.folder).first { app.prefs.update { $0.listFolders.insert(folder.id) } }
+        case "downloads":
+            app.keyController?.toggleDownloads()
+            log("downloads: " + app.downloads.list.items.map { "\($0.filename) \($0.state)" }.joined(separator: ", "))
         case "settings":
             app.showSettings()
         case "quit":

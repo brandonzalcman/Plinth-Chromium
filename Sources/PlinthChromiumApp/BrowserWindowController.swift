@@ -14,6 +14,7 @@ final class WindowChrome {
         case none
         case command(text: String, newPage: Bool)
         case shelf
+        case downloads
         case find
     }
 
@@ -28,16 +29,28 @@ final class WindowChrome {
     /// Shown while the selected page's window is still being made.
     var pendingFrames: [CGRect] = []
     var extensionsMenuOpen = false
+    /// The collapsed sidebar is showing in full over the page while the pointer is on it.
+    var flyoutOpen = false
 }
 
-/// One Plinth window. It draws the chrome (dock or sidebar, panels) and leaves a transparent hole;
-/// the selected page's own Chromium window sits under that hole as a child window.
+/// A clear window above the pages that holds what floats over them: the panels and the sidebar's
+/// hover flyout. It ignores the mouse whenever neither is showing, so the page gets every click.
+final class OverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// One Plinth window. It draws the chrome (dock or sidebar) and leaves room for the page; the selected
+/// page's own Chromium window sits in that room as a child window above it, so it gets clicks and keys
+/// directly. Panels and the sidebar flyout float above the page in a clear overlay window.
 @MainActor
 final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     unowned let app: ChromiumApp
     let windowID: WindowID
     let window: NSWindow
+    let overlay: OverlayWindow
     let chrome = WindowChrome()
+    private var flyoutClose: DispatchWorkItem?
     let isPrivate: Bool
     /// Pages currently placed under the hole, left to right.
     private(set) var shown: [PageID] = []
@@ -53,6 +66,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         window = NSWindow(contentRect: frame,
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
+        overlay = OverlayWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
         super.init()
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -71,6 +85,17 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         // size, which locks the window. The window sizes the content, not the other way round.
         root.sizingOptions = []
         window.contentView = root
+
+        overlay.isOpaque = false
+        overlay.backgroundColor = .clear
+        overlay.hasShadow = false
+        overlay.ignoresMouseEvents = true
+        overlay.isReleasedWhenClosed = false
+        let overlayRoot = NSHostingView(rootView: OverlayRoot(app: app, controller: self, chrome: chrome))
+        overlayRoot.sizingOptions = []
+        overlay.contentView = overlayRoot
+        window.addChildWindow(overlay, ordered: .above)
+        overlay.setFrame(overlayFrame, display: false)
         observeStore()
         refreshContent()
     }
@@ -117,7 +142,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
         // Take away pages that are no longer on screen.
         for id in shown where !ids.contains(id) {
-            app.pool.existing(id)?.attach(below: nil, frame: .zero)
+            app.pool.existing(id)?.attach(to: nil, frame: .zero, cornerRadius: 0)
             chrome.attached[id] = nil
         }
         let changed = shown != ids
@@ -128,13 +153,14 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
             guard let page = app.store.page(id) else { continue }
             let browser = app.pool.browser(for: page)
             if browser.hostWindow != nil {
-                browser.attach(below: window, frame: window.convertToScreen(frame))
+                browser.attach(to: window, frame: window.convertToScreen(frame), cornerRadius: g.cornerRadius)
                 if chrome.attached[id] != frame { chrome.attached[id] = frame }
             } else {
                 pending.append(frame)   // drawn as a blank page until Chromium's window exists
             }
         }
         if chrome.pendingFrames != pending { chrome.pendingFrames = pending }
+        keepOverlayOnTop()
         for id in chrome.attached.keys where !ids.contains(id) { chrome.attached[id] = nil }
 
         let name = app.store.window(windowID)?.selectedPageID.flatMap { app.store.page($0)?.name } ?? "Plinth"
@@ -164,37 +190,87 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         refreshContent()
     }
 
+    // MARK: Overlay
+
+    /// The overlay takes the mouse only while something is showing in it.
+    private func syncOverlay() {
+        let interactive = chrome.panel != .none || chrome.flyoutOpen
+        overlay.ignoresMouseEvents = !interactive
+        if overlay.frame != overlayFrame { overlay.setFrame(overlayFrame, display: true) }
+        keepOverlayOnTop()
+    }
+
+    /// The window less its title strip, so the traffic lights stay visible and usable under a panel.
+    var overlayFrame: NSRect {
+        var f = window.frame
+        if !window.styleMask.contains(.fullScreen) { f.size.height -= ContentGeometry.overlayTopInset }
+        return f
+    }
+
+    /// Pages are children of the window too; the overlay stays above all of them.
+    /// Child windows stack in the order they were added, so the overlay is re-added last when it isn't.
+    private func keepOverlayOnTop() {
+        guard let children = window.childWindows, children.last !== overlay else { return }
+        window.removeChildWindow(overlay)
+        window.addChildWindow(overlay, ordered: .above)
+        overlay.setFrame(overlayFrame, display: false)
+    }
+
+    /// Shows the full sidebar over the page while the pointer is on the rail.
+    func openFlyout() {
+        flyoutClose?.cancel()
+        guard !chrome.flyoutOpen, chrome.panel == .none else { return }
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { chrome.flyoutOpen = true }
+        syncOverlay()
+    }
+
+    /// Closes the flyout shortly after the pointer leaves it (a quick return keeps it open).
+    func closeFlyout(after delay: TimeInterval = 0.25) {
+        flyoutClose?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.chrome.flyoutOpen else { return }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { self.chrome.flyoutOpen = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.syncOverlay() }
+        }
+        flyoutClose = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
     // MARK: Panels
 
     var hasNoPanel: Bool { chrome.panel == .none }
 
+    private func showPanel(_ panel: WindowChrome.Panel) {
+        if chrome.flyoutOpen { chrome.flyoutOpen = false }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) { chrome.panel = panel }
+        syncOverlay()
+        if panel != .none { overlay.makeKey() }
+    }
+
     func openCommandBar(newPage: Bool) {
         let current = newPage ? "" : (app.store.window(windowID)?.selectedPageID.flatMap { app.store.page($0)?.url.absoluteString } ?? "")
-        chrome.panel = .command(text: current, newPage: newPage)
-        window.makeKeyAndOrderFront(nil)
+        showPanel(.command(text: current, newPage: newPage))
     }
 
     func toggleShelf() {
-        chrome.panel = chrome.panel == .shelf ? .none : .shelf
-        if chrome.panel != .none { window.makeKeyAndOrderFront(nil) } else { focusPage() }
+        if chrome.panel == .shelf { dismissPanel() } else { showPanel(.shelf) }
     }
 
     func toggleDownloads() {
-        // Chromium keeps its own downloads list; show it as a page.
-        app.openInNewPage(URL(string: "chrome://downloads")!, in: windowID)
+        if chrome.panel == .downloads { dismissPanel() } else { showPanel(.downloads) }
     }
 
     func openFind() {
         chrome.findNotFound = false
-        chrome.panel = .find
-        window.makeKeyAndOrderFront(nil)
+        showPanel(.find)
     }
 
     @discardableResult
     func dismissPanel() -> Bool {
         guard chrome.panel != .none else { return false }
         if chrome.panel == .find, let id = shown.first { app.pool.existing(id)?.stopFinding() }
-        chrome.panel = .none
+        withAnimation(.easeOut(duration: 0.18)) { chrome.panel = .none }
+        syncOverlay()
         focusPage()
         return true
     }
@@ -274,6 +350,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     }
 
     func windowDidResize(_ notification: Notification) {
+        overlay.setFrame(overlayFrame, display: true)
         refreshContent()
         scheduleFrameSave()
     }
@@ -284,7 +361,9 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
     func windowWillClose(_ notification: Notification) {
         saveFrame()
-        for id in shown { app.pool.existing(id)?.attach(below: nil, frame: .zero) }
+        for id in shown { app.pool.existing(id)?.attach(to: nil, frame: .zero, cornerRadius: 0) }
+        window.removeChildWindow(overlay)
+        overlay.orderOut(nil)
         shown = []
         app.windowDidClose(windowID)
     }

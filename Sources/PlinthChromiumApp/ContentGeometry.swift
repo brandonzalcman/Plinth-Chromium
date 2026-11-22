@@ -22,6 +22,8 @@ public struct ContentGeometry: Equatable, Sendable {
     public static let sidebarWidth: CGFloat = 264
     public static let railWidth: CGFloat = 60
     public static let cornerRadius: CGFloat = 12
+    /// The overlay window (panels, flyout) starts this far below the window's top, clear of the traffic lights.
+    public static let overlayTopInset: CGFloat = 30
 
     /// The room the dock takes along the bottom: the bar and the inset under it.
     public static var dockHeight: CGFloat {

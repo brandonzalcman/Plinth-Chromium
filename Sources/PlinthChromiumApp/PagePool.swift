@@ -168,6 +168,30 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
 final class Favicons {
     private(set) var images: [SiteKey: NSImage] = [:]
     @ObservationIgnored private var requested = Set<String>()
+    /// Where icons are kept between launches, so restored pages show theirs before they load.
+    @ObservationIgnored var cacheDirectory: URL? {
+        didSet { loadCache() }
+    }
+
+    private func cacheFile(_ key: SiteKey) -> URL? {
+        let safe = key.host.replacingOccurrences(of: "/", with: "_")
+        return cacheDirectory?.appendingPathComponent(safe + ".png")
+    }
+
+    private func loadCache() {
+        guard let dir = cacheDirectory,
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.pathExtension == "png" {
+            if let image = NSImage(contentsOf: file) { images[SiteKey(file.deletingPathExtension().lastPathComponent)] = image }
+        }
+    }
+
+    private func store(_ image: NSImage, for key: SiteKey) {
+        guard let file = cacheFile(key), let tiff = image.tiffRepresentation,
+              let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? png.write(to: file, options: .atomic)
+    }
     @ObservationIgnored private var tints: [SiteKey: Color] = [:]
 
     func image(for key: SiteKey) -> NSImage? { images[key] }
@@ -206,7 +230,8 @@ final class Favicons {
     }
 
     func fetch(_ url: URL, for key: SiteKey) {
-        guard images[key] == nil, requested.insert(key.host + "|" + url.absoluteString).inserted else { return }
+        // A cached icon is refreshed once per launch.
+        guard requested.insert(key.host + "|" + url.absoluteString).inserted else { return }
         Task { [weak self] in
             var request = URLRequest(url: url)
             request.timeoutInterval = 10
@@ -214,6 +239,8 @@ final class Favicons {
                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
                   let image = NSImage(data: data), image.isValid else { return }
             self?.images[key] = image
+            self?.tints[key] = nil
+            self?.store(image, for: key)
         }
     }
 }

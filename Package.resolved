@@ -1,0 +1,15 @@
+{
+  "originHash" : "1566955971e2d298e3daa4a53eb082655c4f9f687da1ae2738ef1b0f6e9ab54f",
+  "pins" : [
+    {
+      "identity" : "plinth",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/brandonzalcman/Plinth.git",
+      "state" : {
+        "branch" : "claude/plinthcore-product",
+        "revision" : "c4cbdbed18a8b10a30dac30abe76240a4d41483d"
+      }
+    }
+  ],
+  "version" : 3
+}

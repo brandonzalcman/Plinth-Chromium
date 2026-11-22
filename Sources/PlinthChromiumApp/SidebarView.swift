@@ -142,14 +142,7 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if !model.pins.isEmpty { pinned.padding(.horizontal, 10).padding(.top, 14) }
                     if !groups.isEmpty { groupChips.padding(.top, 14) }
-                    sectionTitle("Open") {
-                        Button { onAction(.newPage) } label: {
-                            Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).foregroundStyle(palette.secondary)
-                                .frame(width: 22, height: 22).background(Circle().fill(palette.hover))
-                        }
-                        .buttonStyle(PressStyle())
-                        .help("New page (⌘T)")
-                    }
+                    newPageRow
                     LazyVStack(alignment: .leading, spacing: 3) {
                         ForEach(Array(model.sites.enumerated()), id: \.element.id) { index, site in
                             siteCard(site, index: index)
@@ -180,6 +173,34 @@ struct SidebarView: View {
         }
         .padding(.trailing, 6)
         .frame(height: 38)
+    }
+
+    /// The "Open" heading doubles as the new-page button: the whole row responds.
+    private var newPageRow: some View {
+        let isHovered = hovered == "newpage"
+        return Button { onAction(.newPage) } label: {
+            HStack(spacing: 8) {
+                Text("Open").font(.system(size: 10.5, weight: .semibold)).tracking(0.6).textCase(.uppercase)
+                    .foregroundStyle(palette.tertiary)
+                Spacer()
+                if isHovered {
+                    Text("New page  ⌘T").font(.system(size: 11, weight: .medium)).foregroundStyle(palette.secondary)
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                }
+                Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isHovered ? palette.primary : palette.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(isHovered ? accent.opacity(0.25) : palette.hover))
+                    .rotationEffect(.degrees(isHovered ? 90 : 0))
+            }
+            .padding(.leading, 10).padding(.trailing, 6).frame(height: 34)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(isHovered ? palette.hover : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle(scale: 0.98))
+        .onHover { hovered = $0 ? "newpage" : (hovered == "newpage" ? nil : hovered) }
+        .help("New page (⌘T)")
+        .padding(.horizontal, 8).padding(.top, 12).padding(.bottom, 2)
     }
 
     private func sectionTitle<Trailing: View>(_ title: String, @ViewBuilder trailing: () -> Trailing) -> some View {

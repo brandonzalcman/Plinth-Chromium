@@ -31,6 +31,8 @@ final class WindowChrome {
     var extensionsMenuOpen = false
     /// The collapsed sidebar is showing in full over the page while the pointer is on it.
     var flyoutOpen = false
+    /// A short message, such as pages being put away on the shelf.
+    var notice: String?
 }
 
 /// A clear window above the pages that holds what floats over them: the panels and the sidebar's
@@ -51,6 +53,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     let overlay: OverlayWindow
     let chrome = WindowChrome()
     private var flyoutClose: DispatchWorkItem?
+    private var noticeTask: DispatchWorkItem?
     let isPrivate: Bool
     /// Pages currently placed under the hole, left to right.
     private(set) var shown: [PageID] = []
@@ -234,6 +237,17 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         }
         flyoutClose = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Shows a short notice over the page for a few seconds.
+    func showNotice(_ text: String) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { chrome.notice = text }
+        noticeTask?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            withAnimation(.easeOut(duration: 0.25)) { self?.chrome.notice = nil }
+        }
+        noticeTask = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2, execute: work)
     }
 
     // MARK: Panels

@@ -35,7 +35,7 @@ public enum ActionRouter {
             } else {
                 store.select(id, in: windowID)
             }
-        case .closePage(let id): store.closePage(id)
+        case .closePage(let id): closePage(id, in: windowID, store: store)
         case .selectPin(let id):
             if let pin = store.pins.first(where: { $0.id == id }), selected == pin.page.id, panels.hasNoPanel {
                 panels.openCommandBar(newPage: false)
@@ -63,7 +63,11 @@ public enum ActionRouter {
         case .ungroupPinFolder(let id): store.ungroupPinFolder(id)
         case .resetPin(let id): store.resetPin(id)
         case .shelveSite(let id): store.shelve(site: id)
-        case .closeSite(let id): store.closeSite(id)
+        case .closeSite(let id):
+            let pages = store.window(windowID)?.sites.first { $0.id == id }?.pages.map(\.id) ?? []
+            let next = selected.flatMap { pages.contains($0) ? mostRecent(in: windowID, excluding: Set(pages), store: store) : nil }
+            store.closeSite(id)
+            if let next { store.select(next, in: windowID) }
         case .renamePage(let id, let name): store.rename(id, to: name)
         case .splitWithCurrent(let id):
             if let selected, selected != id { store.split(selected, with: id, in: windowID) }
@@ -74,6 +78,22 @@ public enum ActionRouter {
         case .splitPages(let dragged, let target):
             if dragged != target { store.split(target, with: dragged, in: windowID) }
         }
+    }
+
+    /// Closes a page. Closing the page you're on takes you back to the one you used just before it,
+    /// pins included, rather than to a neighbour.
+    public static func closePage(_ id: PageID, in windowID: WindowID, store: BrowserStore) {
+        let wasSelected = store.window(windowID)?.selectedPageID == id
+        // Chosen before closing: the store's own pick counts as a visit and would win otherwise.
+        let next = wasSelected ? mostRecent(in: windowID, excluding: [id], store: store) : nil
+        store.closePage(id)
+        if let next { store.select(next, in: windowID) }
+    }
+
+    /// The most recently used page in the window (its sites' pages and its pins), leaving some out.
+    static func mostRecent(in windowID: WindowID, excluding: Set<PageID>, store: BrowserStore) -> PageID? {
+        let pages = (store.window(windowID)?.sites.flatMap(\.pages) ?? []) + store.pins(in: windowID).map(\.page)
+        return pages.filter { !excluding.contains($0.id) }.max { $0.usage.lastUsed < $1.usage.lastUsed }?.id
     }
 
     /// The bar and sidebar count only visible sites when a group is focused; the store counts all of them.

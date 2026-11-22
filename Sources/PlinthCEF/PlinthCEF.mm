@@ -48,6 +48,32 @@ static void PLog(NSString *message) {
     if (getenv("PLINTH_CEF_LOG")) fprintf(stderr, "[cef] %s\n", message.UTF8String);
 }
 
+/// The size a page asked for in window.open(…, "width=…,height=…"), for the popup about to be made.
+static CefSize gNextPopupSize(0, 0);
+
+/// Puts a popup window centred over the Plinth window that is in front, as a child so it moves with it
+/// and stays above it: a floating sheet, like a sign-in window should be.
+static void FloatOverPlinth(CefRefPtr<CefWindow> window, CefSize size) {
+    id handle = (__bridge id)window->GetWindowHandle();
+    NSWindow *ns = [handle isKindOfClass:NSWindow.class] ? handle : [(NSView *)handle window];
+    NSWindow *front = NSApp.mainWindow ?: NSApp.keyWindow;
+    while (front.parentWindow) front = front.parentWindow;
+    int w = size.width > 200 ? std::min(size.width, 1000) : 520;
+    int h = size.height > 200 ? std::min(size.height, 900) : 680;
+    if (front) {
+        NSRect f = front.frame;
+        NSRect r = NSMakeRect(NSMidX(f) - w / 2.0, NSMidY(f) - h / 2.0 + 20, w, h);
+        CGFloat primaryHeight = NSScreen.screens.firstObject.frame.size.height;
+        window->SetBounds(CefRect((int)r.origin.x, (int)(primaryHeight - r.origin.y - r.size.height), w, h));
+    } else {
+        window->CenterWindow(CefSize(w, h));
+    }
+    window->Show();
+    ns.identifier = @"plinth.floating-popup";
+    if (front && ns && ns != front) [front addChildWindow:ns ordered:NSWindowAbove];
+    [ns makeKeyAndOrderFront:nil];
+}
+
 static int gLiveBrowsers = 0;
 static bool gQuitWhenClosed = false;
 
@@ -163,6 +189,13 @@ public:
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        // A popup an extension or page opened (a sign-in window, say) stays, floating over Plinth.
+        if (browser->IsPopup()) {
+            PLog(@"floating a popup window Chromium opened");
+            CefRefPtr<CefBrowserView> view = CefBrowserView::GetForBrowser(browser);
+            if (view && view->GetWindow()) FloatOverPlinth(view->GetWindow(), CefSize(0, 0));
+            return;
+        }
         PLog(@"closing a browser Chromium opened by itself");
         CefRefPtr<CefBrowser> keep = browser;
         // Its address arrives with the first navigation; give it a moment, then close it.
@@ -455,8 +488,9 @@ public:
     // Life span
     bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int, const CefString &targetURL,
                        const CefString &, WindowOpenDisposition disposition, bool userGesture,
-                       const CefPopupFeatures &, CefWindowInfo &, CefRefPtr<CefClient> &client, CefBrowserSettings &,
+                       const CefPopupFeatures &features, CefWindowInfo &, CefRefPtr<CefClient> &client, CefBrowserSettings &,
                        CefRefPtr<CefDictionaryValue> &, bool *) override {
+        gNextPopupSize = CefSize(features.widthSet ? features.width : 0, features.heightSet ? features.height : 0);
         PCEFBrowser *owner = owner_;
         BOOL handled = [owner.delegate browser:owner openURL:NSStringFromCef(targetURL)
                                     disposition:DispositionFrom(disposition)
@@ -547,8 +581,8 @@ public:
     explicit PopupWindowDelegate(CefRefPtr<CefBrowserView> view) : view_(view) {}
     void OnWindowCreated(CefRefPtr<CefWindow> window) override {
         window->AddChildView(view_);
-        window->CenterWindow(CefSize(520, 680));
-        window->Show();
+        FloatOverPlinth(window, gNextPopupSize);
+        gNextPopupSize = CefSize(0, 0);
         view_->RequestFocus();
     }
     void OnWindowDestroyed(CefRefPtr<CefWindow>) override { view_ = nullptr; }
@@ -637,6 +671,7 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
     NSWindow *ns = [handle isKindOfClass:NSWindow.class] ? handle : [(NSView *)handle window];
     ns.excludedFromWindowsMenu = YES;
     ns.hasShadow = NO;
+    ns.identifier = @"plinth.page";
     _hostWindow = ns;
     [self.delegate browserHostWindowReady:self];
 }
@@ -663,14 +698,9 @@ bool BrowserViewDelegate::OnPopupBrowserViewCreated(CefRefPtr<CefBrowserView>, C
         return;
     }
     if (ns.parentWindow && ns.parentWindow != parent) [ns.parentWindow removeChildWindow:ns];
-    // Rounded corners: a clear window whose content is clipped.
-    ns.opaque = NO;
-    ns.backgroundColor = NSColor.clearColor;
-    NSView *content = ns.contentView;
-    content.wantsLayer = YES;
-    content.layer.cornerRadius = cornerRadius;
-    content.layer.cornerCurve = kCACornerCurveContinuous;
-    content.layer.masksToBounds = cornerRadius > 0;
+    // Corners are rounded by the shell drawing over them: clipping Chromium's own layers here stops
+    // the page repainting when it is resized.
+    (void)cornerRadius;
     _host->SetBounds(CefRectFromScreenRect(frame));
     if (!_host->IsVisible()) _host->Show();
     if (ns.parentWindow != parent) [parent addChildWindow:ns ordered:NSWindowAbove];

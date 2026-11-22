@@ -194,7 +194,15 @@ final class Favicons {
     }
     @ObservationIgnored private var tints: [SiteKey: Color] = [:]
 
-    func image(for key: SiteKey) -> NSImage? { images[key] }
+    /// The site's icon. A site with none yet (a pin that hasn't loaded this session, say) gets its
+    /// /favicon.ico fetched in the background, once, and kept on disk after that.
+    func image(for key: SiteKey) -> NSImage? {
+        if let image = images[key] { return image }
+        if !key.host.isEmpty, key.host.contains("."), let url = URL(string: "https://\(key.host)/favicon.ico") {
+            DispatchQueue.main.async { [weak self] in self?.fetch(url, for: key) }
+        }
+        return nil
+    }
 
     /// The site's colour: the most saturated colour in its icon, or a stable hue from its host.
     func tint(for key: SiteKey) -> Color {

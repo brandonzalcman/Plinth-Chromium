@@ -283,8 +283,12 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             if let page = store.page(id) { pool.browser(for: page) }
         case .pageClosed(let id):
             pool.close(id)
-        case .pagesShelved(let ids, _):
+        case .pagesShelved(let ids, let key):
             pool.close(ids)
+            // Say where they went: pages that faded away should never just vanish.
+            let name = store.shelf.first { $0.key == key }?.name ?? key.host
+            let text = ids.count == 1 ? "\(name) put away on the shelf" : "\(ids.count) \(name) pages put away on the shelf"
+            for c in controllers.values where !store.isPrivate(window: c.windowID) { c.showNotice(text) }
         case .pagesRestored(let ids, _):
             for id in ids { if let page = store.page(id) { pool.browser(for: page) } }
         case .selectionChanged(let window):
@@ -396,7 +400,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         guard let id = keyWindowID, let controller = controllers[id] else { NSApp.keyWindow?.performClose(nil); return }
         if controller.dismissPanel() { return }
         if let page = store.window(id)?.selectedPageID, store.window(id)?.page(page) != nil {
-            store.closePage(page)
+            ActionRouter.closePage(page, in: id, store: store)
         } else {
             controller.window.performClose(nil)
         }

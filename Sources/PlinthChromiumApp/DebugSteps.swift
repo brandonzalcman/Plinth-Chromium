@@ -1,5 +1,6 @@
 import AppKit
 import PlinthModel
+import PlinthFade
 import PlinthSidebar
 
 /// Scripted checks without clicking, like the Mac app's PLINTH_STEPS hook. Steps are separated by
@@ -107,6 +108,11 @@ enum DebugSteps {
         case "downloads":
             app.keyController?.toggleDownloads()
             log("downloads: " + app.downloads.list.items.map { "\($0.filename) \($0.state)" }.joined(separator: ", "))
+        case "fadenow":
+            // Makes every page old enough to fade, then runs fading: checks auto-shelving end to end.
+            store.setFader(FadeEngine(policy: FadePolicy(siteBaseLifetime: 2, siteLifetimePerExtraDay: 1, siteMaxLifetime: 4, pageBaseLifetime: 2, pageMaxLifetime: 4, minFadingDuration: 0.5)))
+            app.scheduleFade()
+            log("after fade: shelf=\(store.shelf.map { "\($0.name)(\($0.pages.count))" }) sites=\(store.window(wid)?.sites.map(\.name) ?? []) fading=\(store.window(wid)?.sites.filter { $0.fade == .fading }.map(\.name) ?? [])")
         case "settings":
             app.showSettings()
         case "quit":

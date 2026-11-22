@@ -49,7 +49,12 @@ final class ExtensionsController: NSObject, PCEFBrowserDelegate {
         if browser.hostWindow != nil { browserHostWindowReady(browser) }
         // Click outside or Esc closes it, like a popover.
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            if let host = self?.popup?.hostWindow, event.window !== host { self?.closePopup() }
+            // A click in Plinth's own window, its overlay or a page closes the popup, like a popover.
+            // Clicks in the popup, or in a sign-in window it opened (floating above), keep it.
+            guard let host = self?.popup?.hostWindow, let clicked = event.window, clicked !== host else { return event }
+            let isPlinth = clicked is OverlayWindow || clicked.identifier?.rawValue == "plinth.page"
+                || ChromiumApp.shared.allControllers.contains { $0.window === clicked }
+            if isPlinth { self?.closePopup() }
             return event
         } as Any)
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -84,7 +89,9 @@ final class ExtensionsController: NSObject, PCEFBrowserDelegate {
     }
 
     func browser(_ browser: PCEFBrowser, openURL url: String, disposition: PCEFOpenDisposition, userGesture: Bool) -> Bool {
-        // Links from a popup open as ordinary pages in the window it belongs to.
+        // A window it opens (sign-in, say) floats over Plinth and the extension's popup stays put.
+        if disposition == .popup { return false }
+        // Links open as ordinary pages, and the popup gets out of the way, like a toolbar popup does.
         if let target = URL(string: url) { app.openInNewPage(target) }
         closePopup()
         return true

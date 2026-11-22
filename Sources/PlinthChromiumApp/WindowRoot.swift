@@ -217,6 +217,28 @@ struct DockHost: View {
             onAction: { app.handle($0, in: windowID) }
         )
         .colorMultiply(controller.isPrivate ? Color(red: 0.78, green: 0.76, blue: 1.0) : .white)
+        // How many pages are on the shelf, on the bar's shelf button.
+        .overlay(alignment: .topTrailing) {
+            let count = controller.isPrivate ? 0 : app.store.shelf.count
+            if count > 0 {
+                Text("\(min(count, 99))").font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white).padding(.horizontal, 4).frame(minWidth: 15, minHeight: 15)
+                    .background(Capsule().fill(app.accent(scheme)))
+                    .offset(x: -Self.shelfBadgeInset(withDownloads: app.downloads.list.barState != nil), y: 8)
+                    .transition(.scale.combined(with: .opacity))
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: app.store.shelf.count)
+    }
+
+    /// Distance from the bar's right edge to the shelf button's top-right corner (the bar's own
+    /// arithmetic: padding, then the search button, then the downloads button if shown).
+    static func shelfBadgeInset(withDownloads: Bool) -> CGFloat {
+        let m = BarMetrics.standard
+        let search = m.searchPadding * 2 + BarTextMeasurer.width("Search", style: .regular) + m.searchGap
+            + BarTextMeasurer.width("⌘L", style: .regular)
+        return m.barPadding + search + 4 + (withDownloads ? 36 : 0) - 4
     }
 }
 
@@ -232,9 +254,10 @@ struct PanelLayer: View {
     var body: some View {
         let accent = app.accent(scheme)
         let page = geometry.pageFrame(in: size)
-        // Panels sit over the page: centred on it, lifted off its bottom edge.
+        // Panels sit over the page, centred on it. With the dock they rise from the bar, where the eye
+        // already is; with the sidebar the command bar sits at eye level, a little above the middle.
         let centreX = page.midX
-        let lift: CGFloat = geometry.layout == .dock ? ContentGeometry.dockHeight + 12 : 24
+        let lift: CGFloat = geometry.layout == .dock ? ContentGeometry.dockHeight + 12 : max(24, size.height * 0.42)
         switch chrome.panel {
         case .none:
             EmptyView()
@@ -317,6 +340,12 @@ struct OverlayRoot: View {
             let g = ContentGeometry(layout: app.prefs.value.tabLayout, sidebarCollapsed: app.prefs.value.sidebarCollapsed,
                                     chromeHidden: chrome.chromeHidden)
             ZStack(alignment: .topLeading) {
+                // Rounds the pages' corners by covering them with the surface colour.
+                if !chrome.chromeHidden {
+                    CornerCaps(frames: chrome.attached.values.map { r in
+                        CGRect(x: r.minX, y: size.height - r.maxY, width: r.width, height: r.height)
+                    }, radius: g.cornerRadius, colour: ShellPalette(scheme, isPrivate: controller.isPrivate).surface)
+                }
                 if chrome.flyoutOpen {
                     // A click on the page side closes the flyout.
                     Color.black.opacity(0.06)
@@ -335,11 +364,49 @@ struct OverlayRoot: View {
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 }
                 PanelLayer(app: app, controller: controller, chrome: chrome, size: size, geometry: g)
+                // "Put away" notice, near the shelf it points to.
+                if let notice = chrome.notice {
+                    HStack(spacing: 8) {
+                        Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(app.accent(scheme))
+                        Text(notice).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                    }
+                    .padding(.horizontal, 14).frame(height: 34)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                           alignment: g.layout == .dock ? .bottomTrailing : .bottomLeading)
+                    .padding(g.layout == .dock ? .trailing : .leading, g.layout == .dock ? 60 : g.sidebarColumnWidth + 12)
+                    .padding(.bottom, g.layout == .dock ? ContentGeometry.dockHeight + 10 : 14)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .allowsHitTesting(false)
+                }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
         }
         .ignoresSafeArea()
         .preferredColorScheme(controller.isPrivate ? .dark : nil)
+    }
+}
+
+/// The four corners outside each page's rounded rectangle, filled with the surface colour.
+struct CornerCaps: View {
+    let frames: [CGRect]
+    let radius: CGFloat
+    let colour: Color
+
+    var body: some View {
+        Canvas { ctx, _ in
+            for f in frames where radius > 0 {
+                let rounded = Path(roundedRect: f, cornerRadius: radius, style: .continuous)
+                for corner in [CGPoint(x: f.minX, y: f.minY), CGPoint(x: f.maxX - radius, y: f.minY),
+                               CGPoint(x: f.minX, y: f.maxY - radius), CGPoint(x: f.maxX - radius, y: f.maxY - radius)] {
+                    let square = Path(CGRect(origin: corner, size: CGSize(width: radius, height: radius)))
+                    ctx.fill(square.subtracting(rounded), with: .color(colour))
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

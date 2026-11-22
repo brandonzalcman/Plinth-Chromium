@@ -134,4 +134,43 @@ final class Recorder: PageNavigating, WindowPanels {
         send(.moveSite(site("c.com").id, toIndex: 0))
         #expect(store.window(window)!.sites.map(\.key.host) == ["c.com", "a.com", "b.com", "d.com"])
     }
+
+    @Test func closingThePageYouAreOnGoesBackToTheOneUsedBefore() {
+        let a = open("https://a.com/1")
+        open("https://a.com/2")
+        let c = open("https://a.com/3")
+        store.select(a, in: window)
+        store.select(c, in: window)
+        // A neighbour would be a.com/2; the page used just before was a.com/1.
+        send(.closePage(c))
+        #expect(selected == a)
+    }
+
+    @Test func closingTheLastPageOfASiteCanReturnToAPin() {
+        open("https://pin.com/")
+        send(.pinSite(site("pin.com").id))
+        let pin = store.pins[0].page.id
+        let b = open("https://b.com/")
+        store.select(pin, in: window)
+        store.select(b, in: window)
+        send(.closePage(b))
+        #expect(selected == pin)
+    }
+
+    @Test func closingAPageInTheBackgroundKeepsTheSelection() {
+        let a = open("https://a.com/")
+        let b = open("https://b.com/")
+        send(.closePage(a))
+        #expect(selected == b)
+    }
+
+    @Test func closingTheCurrentSiteGoesToTheMostRecentOtherPage() {
+        let a = open("https://a.com/")
+        open("https://b.com/")
+        let c1 = open("https://c.com/1")
+        store.select(a, in: window)
+        store.select(c1, in: window)
+        send(.closeSite(site("c.com").id))
+        #expect(selected == a)
+    }
 }

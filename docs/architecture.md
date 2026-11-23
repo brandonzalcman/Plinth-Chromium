@@ -105,8 +105,11 @@ iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
 - **Background pages restored from the last session load only when first shown.**
 - Downloads are Plinth's own (saved to the Downloads folder or the one in Settings, shown in the
   dock's downloads button, the sidebar and the shared downloads tray); Chromium's download bubble is off.
-- Not ported yet from the Mac app: Ask, split-view divider dragging, page snapshots on the shelf,
-  content blocking (use an extension for now), and drag-and-drop between windows.
+- Not ported yet from the Mac app: content blocking (use an extension for now) and drag-and-drop
+  between windows.
+- Shelf snapshots come from Chromium's DevTools screenshot (`Page.captureScreenshot`), which can't
+  picture a hidden page, so the page on screen is pictured shortly after it's shown or finishes loading
+  (Snapshots.swift). A page that was never on screen has no snapshot.
 - **No Chromium sandbox** (`no_sandbox`), no hardened runtime, no notarization, no Sparkle yet.
 - On-device AI (Foundation Models, as on the Mac) drives semantic history and the resume card's summary.
   Page text comes from the shared reader script, evaluated in the page's main frame by Plinth's renderer

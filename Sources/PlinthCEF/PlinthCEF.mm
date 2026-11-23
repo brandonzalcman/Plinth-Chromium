@@ -12,6 +12,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_cookie.h"
+#include "include/cef_devtools_message_observer.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_id_mappers.h"
 #include "include/cef_process_message.h"
@@ -737,6 +738,28 @@ private:
     IMPLEMENT_REFCOUNTING(TextVisitor);
 };
 
+/// Waits for one DevTools method's result (Page.captureScreenshot) and hands its JSON to a block.
+class DevToolsResultObserver : public CefDevToolsMessageObserver {
+public:
+    explicit DevToolsResultObserver(void (^done)(NSData *)) : done_([done copy]) {}
+    int messageID = 0;
+    CefRefPtr<CefRegistration> registration;
+
+    void OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int message_id, bool success, const void *result,
+                                size_t result_size) override {
+        if (message_id != messageID || !done_) return;
+        NSData *json = success && result ? [NSData dataWithBytes:result length:result_size] : nil;
+        void (^done)(NSData *) = done_;
+        done_ = nil;
+        dispatch_async(dispatch_get_main_queue(), ^{ done(json); });
+        registration = nullptr;   // stop observing; the browser holds no other reference
+    }
+
+private:
+    void (^done_)(NSData *);
+    IMPLEMENT_REFCOUNTING(DevToolsResultObserver);
+};
+
 /// The borderless window that holds one page's browser view.
 class HostWindowDelegate : public CefWindowDelegate {
 public:
@@ -977,6 +1000,38 @@ static int gNextEvaluationID = 1;
     };
     _browser->GetMainFrame()->GetText(new TextVisitor(once));
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kEvalTimeout), dispatch_get_main_queue(), ^{ once(nil); });
+}
+
+- (void)captureSnapshot:(void (^)(NSData *))completion {
+    __block void (^done)(NSData *) = [completion copy];
+    if (!_browser || _closed) {
+        dispatch_async(dispatch_get_main_queue(), ^{ done(nil); });
+        return;
+    }
+    void (^once)(NSData *) = ^(NSData *json) {
+        if (!done) return;
+        void (^call)(NSData *) = done;
+        done = nil;
+        NSData *image = nil;
+        if (json) {
+            NSDictionary *result = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
+            NSString *base64 = [result isKindOfClass:[NSDictionary class]] ? result[@"data"] : nil;
+            if ([base64 isKindOfClass:[NSString class]]) image = [[NSData alloc] initWithBase64EncodedString:base64 options:0];
+        }
+        call(image);
+    };
+    CefRefPtr<DevToolsResultObserver> observer = new DevToolsResultObserver(once);
+    CefRefPtr<CefBrowserHost> host = _browser->GetHost();
+    observer->registration = host->AddDevToolsMessageObserver(observer);
+    CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+    params->SetString("format", "jpeg");
+    params->SetInt("quality", 70);
+    observer->messageID = host->ExecuteDevToolsMethod(0, "Page.captureScreenshot", params);
+    if (observer->messageID == 0) { once(nil); return; }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kEvalTimeout), dispatch_get_main_queue(), ^{
+        observer->registration = nullptr;
+        once(nil);
+    });
 }
 
 - (void)close {

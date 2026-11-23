@@ -164,6 +164,8 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
                    password:(NSString *)password;
 /// The main frame's plain text (Chromium's own text dump, no structure), or nil.
 - (void)readPlainText:(void (^)(NSString *_Nullable text))completion;
+/// A JPEG of what the page shows (Chromium's DevTools screenshot), or nil if it can't be taken.
+- (void)captureSnapshot:(void (^)(NSData *_Nullable jpeg))completion;
 /// Shows the page's window as a child above `parent`, filling `frame` (screen coordinates) with its
 /// corners rounded to `cornerRadius`, or hides it when `parent` is nil. Pages sit above Plinth's
 /// window so they get clicks and keys directly.

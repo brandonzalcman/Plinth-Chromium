@@ -75,6 +75,9 @@ enum DebugSteps {
             app.keyController?.openCommandBar(newPage: true)
         case "shelf":
             app.keyController?.toggleShelf()
+        case "divider":
+            // divider <x>: drags the split divider to x points from the window's left edge.
+            if let x = Double(arg), let c = app.keyController { c.dragSplitDivider(to: x); c.endSplitDividerDrag() }
         case "clearshelf":
             app.clearShelf()
         case "undoshelf":

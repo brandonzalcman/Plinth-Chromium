@@ -79,6 +79,11 @@ struct WindowRoot: View {
                         .frame(width: r.width, height: r.height)
                         .offset(x: r.minX, y: r.minY)
                 }
+                if let d = chrome.splitDivider {
+                    SplitDivider(controller: controller, dragging: chrome.draggingDivider)
+                        .frame(width: d.width, height: d.height)
+                        .offset(x: flip(d).minX, y: flip(d).minY)
+                }
                 if !chrome.chromeHidden {
                     if holes.isEmpty && pending.isEmpty { EmptyWindow(app: app, controller: controller, frame: flip(g.pageFrame(in: size)), radius: radius, palette: palette) }
                     switch g.layout {
@@ -348,7 +353,8 @@ struct PanelLayer: View {
                 ShelfView(
                     entries: app.store.shelf, accent: accent,
                     icon: { app.pool.favicons.image(for: $0) },
-                    snapshot: { _ in nil },
+                    snapshot: { app.snapshots.snapshot(for: $0) },
+                    hasSnapshot: { app.snapshots.hasSnapshot(for: $0) },
                     onRestore: { entry, page in
                         let ids = app.store.restore(entry: entry, page: page, into: controller.windowID)
                         controller.dismissPanel()
@@ -537,5 +543,35 @@ struct Dimmer: View {
         Color.black.opacity(0.12)
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
+    }
+}
+
+/// The gap between split pages. Drag it to share the width differently; double-click to even it out.
+struct SplitDivider: View {
+    let controller: BrowserWindowController
+    let dragging: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.clear.contentShape(Rectangle())
+                Capsule()
+                    .fill(dragging ? Brand.blue : Color.primary.opacity(hovering ? 0.45 : 0.18))
+                    .frame(width: dragging || hovering ? 4 : 3, height: min(56, geo.size.height / 4))
+                    .animation(.easeOut(duration: 0.15), value: hovering)
+                    .animation(.easeOut(duration: 0.15), value: dragging)
+            }
+            .onHover { inside in
+                hovering = inside
+                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in controller.dragSplitDivider(to: value.location.x) }
+                    .onEnded { _ in controller.endSplitDividerDrag() }
+            )
+            .onTapGesture(count: 2) { controller.resetSplitDivider() }
+        }
     }
 }

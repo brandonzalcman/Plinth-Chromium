@@ -98,6 +98,9 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
         guard let b = browsers.removeValue(forKey: id) else { return }
         closing.insert(ObjectIdentifier(b))
         progress[id] = nil
+        // Hide it first: Chromium can take a while to tear the window down, and a page put away from
+        // a split would otherwise linger beside its partner.
+        b.attach(to: nil, frame: .zero, cornerRadius: 0)
         b.close()
     }
 

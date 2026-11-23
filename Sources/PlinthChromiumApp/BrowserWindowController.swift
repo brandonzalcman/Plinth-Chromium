@@ -46,6 +46,9 @@ final class WindowChrome {
     var resumeCard: ResumeCard?
     /// The page inside the peek card, in view coordinates, once its window is showing (Peek/).
     var peekPage: CGRect?
+    /// The gap between split panes (view coordinates), where the divider can be dragged.
+    var splitDivider: CGRect?
+    var draggingDivider = false
     // Ask (Ask.swift).
     var askScope: AskScope = .page
     var askAnswer = ""
@@ -88,6 +91,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     var peek: PeekController?
     /// The answer being written for Ask.
     var askTask: Task<Void, Never>?
+    /// The split's left share while the divider is being dragged; saved to the store when it's let go.
+    private var liveSplitFraction: Double?
 
     init(app: ChromiumApp, windowID: WindowID) {
         self.app = app
@@ -219,9 +224,12 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         let (ids, fraction) = pagesToShow()
         let size = contentSize
         let g = geometry
+        let shownFraction = ids.count == 2 ? (liveSplitFraction ?? fraction) : fraction
         let frames: [CGRect] = ids.count == 2
-            ? { let (a, b) = g.splitFrames(in: size, fraction: fraction); return [a, b] }()
+            ? { let (a, b) = g.splitFrames(in: size, fraction: shownFraction); return [a, b] }()
             : ids.isEmpty ? [] : [g.pageFrame(in: size)]
+        let divider = ids.count == 2 && !chrome.chromeHidden ? g.splitDivider(in: size, fraction: shownFraction) : nil
+        if chrome.splitDivider != divider { chrome.splitDivider = divider }
 
         // Take away pages that are no longer on screen.
         for id in shown where !ids.contains(id) {
@@ -230,6 +238,9 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         }
         let changed = shown != ids
         shown = ids
+        if changed {
+            for id in ids { if let b = app.pool.existing(id) { app.snapshots.schedule(id, browser: b) } }
+        }
 
         var pending: [CGRect] = []
         for (id, frame) in zip(ids, frames) {
@@ -258,6 +269,32 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
                 focusPage()
             }
         }
+    }
+
+    /// The split divider moved to `x` (view coordinates). The pages follow it at once; the store
+    /// keeps the new size when the drag ends.
+    func dragSplitDivider(to x: CGFloat) {
+        guard shown.count == 2 else { return }
+        chrome.draggingDivider = true
+        liveSplitFraction = geometry.splitFraction(forDividerAt: x, in: contentSize)
+        refreshContent()
+    }
+
+    func endSplitDividerDrag() {
+        chrome.draggingDivider = false
+        guard let live = liveSplitFraction else { return }
+        liveSplitFraction = nil
+        let (ids, _) = pagesToShow()
+        guard ids.count == 2, let split = app.store.window(windowID)?.split else { refreshContent(); return }
+        // The stored fraction belongs to the split's leading page, which may be shown on the right.
+        app.store.setSplitFraction(ids.first == split.leading ? live : 1 - live, in: windowID)
+        refreshContent()
+    }
+
+    /// Double-clicking the divider makes the two pages the same width.
+    func resetSplitDivider() {
+        app.store.setSplitFraction(0.5, in: windowID)
+        refreshContent()
     }
 
     /// A page's Chromium window just appeared: put it in place if it should be showing.

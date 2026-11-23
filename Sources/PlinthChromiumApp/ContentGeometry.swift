@@ -70,5 +70,20 @@ public struct ContentGeometry: Equatable, Sendable {
         return (left, right)
     }
 
+    /// The left pane's share of the width when the divider's centre is at `x`, clamped to 0.2...0.8.
+    public func splitFraction(forDividerAt x: CGFloat, in size: CGSize) -> Double {
+        let page = pageFrame(in: size)
+        let gap = Self.margin
+        guard page.width > gap else { return 0.5 }
+        let f = Double((x - gap / 2 - page.minX) / (page.width - gap))
+        return min(max(f, 0.2), 0.8)
+    }
+
+    /// The gap between the two panes of a split, where the divider sits.
+    public func splitDivider(in size: CGSize, fraction: Double) -> CGRect {
+        let (left, right) = splitFrames(in: size, fraction: fraction)
+        return CGRect(x: left.maxX, y: left.minY, width: right.minX - left.maxX, height: left.height)
+    }
+
     public var cornerRadius: CGFloat { chromeHidden ? 0 : Self.cornerRadius }
 }

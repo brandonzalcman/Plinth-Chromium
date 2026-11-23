@@ -53,6 +53,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored var ai: AIService!
     /// Ends the Undo window after "Clear all" on the shelf (ShelfAndSuggestions.swift).
     @ObservationIgnored var shelfUndoTask: Task<Void, Never>?
+    /// Pictures of pages for the shelf (Snapshots.swift).
+    @ObservationIgnored var snapshots = PageSnapshots(directory: nil)
     /// History entries already sent to the semantic index this run.
     @ObservationIgnored var indexedHistory = Set<UUID>()
     /// Windows for links from other apps (see MiniWindow.swift).
@@ -147,6 +149,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         bookmarks = BookmarkStore(storageDirectory: storageDirectory)
         pool = PagePool(siteKey: { [identity] in identity.key(for: $0) })
         pool.favicons.cacheDirectory = storageDirectory.appendingPathComponent("Favicons", isDirectory: true)
+        snapshots = PageSnapshots(directory: storageDirectory.appendingPathComponent("Snapshots", isDirectory: true))
         extensions = ExtensionsController(app: self, profileDirectory: chromiumProfileDirectory)
         downloads = DownloadsModel()
         // A page opened straight onto a file has nothing to show once the file is down: close it then
@@ -309,7 +312,15 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             }
             return false
         }
-        pool.callbacks.loadingChanged = { [weak self] _ in self?.loadingTick &+= 1 }
+        pool.callbacks.loadingChanged = { [weak self] id in
+            guard let self else { return }
+            self.loadingTick &+= 1
+            // A page on screen that just finished loading: picture it for the shelf.
+            if let window = self.windowShowing(id), self.controllers[window]?.shown.contains(id) == true,
+               let browser = self.pool.existing(id), !browser.isLoading {
+                self.snapshots.schedule(id, browser: browser)
+            }
+        }
         pool.callbacks.fullscreenChanged = { [weak self] id, fullscreen in
             guard let self, let window = self.windowShowing(id) else { return }
             self.controllers[window]?.setChromeHidden(fullscreen)
@@ -340,6 +351,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             if let page = store.page(id) { pool.browser(for: page) }
         case .pageClosed(let id):
             pool.close(id)
+            snapshots.remove(id)
             passwords.pageClosed(id)
         case .pagesShelved(let ids, let key):
             pool.close(ids)

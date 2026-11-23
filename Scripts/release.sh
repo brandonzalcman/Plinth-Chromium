@@ -78,7 +78,23 @@ step "Writing the update feed"
 SIGNATURE="$("$SPARKLE_BIN/sign_update" "$DMG")"   # sparkle:edSignature="…" length="…"
 NOTES=""
 if [[ -n "${RELEASE_NOTES:-}" && -f "$RELEASE_NOTES" ]]; then
-    NOTES="<description><![CDATA[$(cat "$RELEASE_NOTES")]]></description>"
+    # The update window shows HTML: paragraphs, bullet lists and **bold** are enough for the notes.
+    HTML="$(python3 - "$RELEASE_NOTES" <<'PY'
+import html, re, sys
+out, items = [], []
+def flush():
+    if items: out.append("<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"); items.clear()
+for line in open(sys.argv[1]).read().splitlines():
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html.escape(line.strip()))
+    if line.startswith("- "): items.append(text[2:])
+    else:
+        flush()
+        if text: out.append(f"<p>{text}</p>")
+flush()
+print("".join(out))
+PY
+)"
+    NOTES="<description><![CDATA[$HTML]]></description>"
 fi
 cat > "$OUT/appcast.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>

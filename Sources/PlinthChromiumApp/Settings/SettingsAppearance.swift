@@ -39,7 +39,50 @@ struct AppearanceSettingsView: View {
                 SettingsDivider()
                 SettingsNote(text: "Changes Plinth's icon in the Dock while it runs. The icon in Finder and the Applications folder stays Sunrise, and the Dock goes back to it when Plinth quits. The other colours unlock as you level up.")
             }
+
+            SettingsCard(heading: "Pages") {
+                SettingsRow(title: "Default page zoom", caption: "Applies from the next time Plinth opens, to pages you haven't zoomed yourself. Actual Size (⌘0) uses it right away.") {
+                    HStack(spacing: 10) {
+                        if zoomIndex != Self.zoomSteps.firstIndex(of: 1) {
+                            Button("Reset") { settings.update { $0.defaultZoom = 1 } }.buttonStyle(.plain)
+                                .font(.system(size: 11.5, weight: .medium)).foregroundStyle(t.accentText).fixedSize()
+                                .accessibilityLabel("Reset default page zoom")
+                        }
+                        Slider(value: Binding(get: { Double(zoomIndex) }, set: { v in settings.update { s in s.defaultZoom = Self.zoomSteps[min(max(Int(v.rounded()), 0), Self.zoomSteps.count - 1)] } }),
+                               in: 0...Double(Self.zoomSteps.count - 1), step: 1)
+                            .frame(width: 130).tint(t.accent).accessibilityLabel("Default page zoom")
+                        Text("\(Int((Self.zoomSteps[zoomIndex] * 100).rounded()))%").font(.system(size: 12.5, weight: .medium).monospacedDigit())
+                            .foregroundStyle(t.p.primary).frame(width: 44, alignment: .trailing)
+                    }
+                }
+                SettingsDivider()
+                SettingsRow(title: "Default font size", caption: "Applies immediately.") {
+                    SettingsStepper(label: "default font size", valueText: "\(settings.value.defaultFontSize) px",
+                                    isDefault: settings.value.defaultFontSize == 16,
+                                    canDecrement: settings.value.defaultFontSize > 9, canIncrement: settings.value.defaultFontSize < 72,
+                                    decrement: { settings.update { $0.defaultFontSize = max(9, $0.defaultFontSize - 1) } },
+                                    increment: { settings.update { $0.defaultFontSize = min(72, $0.defaultFontSize + 1) } },
+                                    reset: { settings.update { $0.defaultFontSize = 16 } })
+                }
+                SettingsDivider()
+                SettingsRow(title: "Minimum font size", caption: "Keeps tiny text readable. Applies immediately.") {
+                    SettingsStepper(label: "minimum font size", valueText: settings.value.minimumFontSize == 0 ? "None" : "\(settings.value.minimumFontSize) px",
+                                    isDefault: settings.value.minimumFontSize == 0,
+                                    canDecrement: settings.value.minimumFontSize > 0, canIncrement: settings.value.minimumFontSize < 36,
+                                    decrement: { settings.update { $0.minimumFontSize = $0.minimumFontSize <= 6 ? 0 : $0.minimumFontSize - 1 } },
+                                    increment: { settings.update { $0.minimumFontSize = $0.minimumFontSize == 0 ? 6 : min(36, $0.minimumFontSize + 1) } },
+                                    reset: { settings.update { $0.minimumFontSize = 0 } })
+                }
+            }
         }
+    }
+
+    /// The same steps as the Mac app's page zoom setting.
+    static let zoomSteps: [Double] = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+
+    private var zoomIndex: Int {
+        let z = settings.value.defaultZoom
+        return Self.zoomSteps.indices.min { abs(Self.zoomSteps[$0] - z) < abs(Self.zoomSteps[$1] - z) } ?? 5
     }
 
     private var appearanceCaption: String {

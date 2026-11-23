@@ -11,7 +11,7 @@ import PlinthSidebar
 /// wait <s> · open <url> · nav <url> · select <n> (⌘-number) · pin · unpin · folder · keep · putaway ·
 /// split · layout dock|sidebar · collapse · command · shelf · close · extensions · popup <n> · state ·
 /// js <script> · readtext · dwell <s> · meaning <query> · restore · card · clickcard · mini <url> · promote · promotekey ·
-/// minikey · quit
+/// minikey · eval <expr> · zoom [in|out|reset] · setting <name> on|off · private <url> · quit
 ///
 /// Bookmarks, history, import, passwords and sync (DebugFeatureSteps.swift): bookmark · bookmarks · history ·
 /// bmstate · historycount · clearhistory · import <browser> · pw add|list|answer|pending|delete|clear … ·

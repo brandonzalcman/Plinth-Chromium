@@ -94,6 +94,8 @@ final class DownloadsModel {
     private(set) var justFinished: UUID?
     /// A download from this address has stopped (finished, cancelled or failed).
     @ObservationIgnored var onStopped: (URL) -> Void = { _ in }
+    /// "Open safe files after downloading" is on.
+    @ObservationIgnored var opensSafeFiles: () -> Bool = { false }
 
     init() {
         PCEFRuntime.downloadHandler = { [weak self] download in
@@ -106,6 +108,11 @@ final class DownloadsModel {
         let before = known?.state
         list.apply(u)
         if before == .running || known == nil, !u.isInProgress, let url = URL(string: u.url) { onStopped(url) }
+        if before != .finished, u.isComplete, opensSafeFiles(),
+           let file = list.items.first(where: { list.chromiumIDs[$0.id] == u.id })?.fileURL,
+           DownloadSafety.isSafeToOpen(filename: file.lastPathComponent) {
+            NSWorkspace.shared.open(file)
+        }
         if before == .running, u.isComplete, let item = list.items.first(where: { list.chromiumIDs[$0.id] == u.id }) {
             justFinished = item.id
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
@@ -126,6 +133,24 @@ final class DownloadsModel {
 
     func cancel(_ id: UUID) {
         if let chromium = list.chromiumIDs[id] { PCEFRuntime.cancelDownload(chromium) }
+    }
+
+    /// "Ask where to save each file": a save panel with the name Plinth would use. `decide` gets the
+    /// chosen path, or nil when the panel is cancelled (which cancels the download).
+    static func chooseSaveLocation(suggested: String, decide: @escaping (String?) -> Void) {
+        let suggestedURL = URL(fileURLWithPath: suggested)
+        let panel = NSSavePanel()
+        panel.directoryURL = suggestedURL.deletingLastPathComponent()
+        panel.nameFieldStringValue = suggestedURL.lastPathComponent
+        panel.canCreateDirectories = true
+        NSApp.activate()
+        // A panel of its own: a sheet on the browser window would sit under the page's window.
+        panel.begin { response in
+            guard response == .OK, let chosen = panel.url else { decide(nil); return }
+            // The panel already confirmed replacing a file that is there.
+            try? FileManager.default.removeItem(at: chosen)
+            decide(chosen.path)
+        }
     }
 
     func remove(_ id: UUID) { list.remove(id) }

@@ -2,9 +2,9 @@ import SwiftUI
 import AppKit
 import PlinthSettings
 
-/// Chromium keeps its own privacy controls (cookies, HTTPS-First, site permissions, clearing data),
-/// so this section links to them rather than repeating the Mac app's WebKit switches. Plinth's own
-/// history (⌘Y, and what iCloud sync shares) is cleared here, as on the Mac.
+/// The Mac app's protection switches (set as Chromium preferences, see ChromiumPreferences.swift),
+/// with links to Chromium's own controls for the rest. Plinth's own history (⌘Y, and what iCloud
+/// sync shares) is cleared here, as on the Mac.
 struct PrivacySettingsView: View {
     let app: ChromiumApp
     @Environment(\.settingsTheme) private var t
@@ -14,6 +14,14 @@ struct PrivacySettingsView: View {
 
     var body: some View {
         SettingsPage(title: "Privacy & Security") {
+            SettingsCard(heading: "Protection") {
+                SettingsToggleRow(title: "Block third-party cookies", caption: "Stops sites from following you across other sites. Some embedded logins may need it off.", isOn: settings.binding(\.blockThirdPartyCookies))
+                SettingsDivider()
+                SettingsToggleRow(title: "Always use HTTPS", caption: "Upgrades http links to https. If a site has no secure version, Plinth asks before opening it unsecured.", isOn: settings.binding(\.httpsOnly))
+                SettingsDivider()
+                SettingsToggleRow(title: "Send Global Privacy Control", caption: "Tells sites you don't want your data sold or shared.", isOn: settings.binding(\.globalPrivacyControl))
+            }
+
             SettingsCard(heading: "Address bar") {
                 SettingsToggleRow(title: "Search suggestions", caption: "Shows suggestions from your search engine as you type in the address bar. This sends what you type to that engine.", isOn: settings.binding(\.searchSuggestionsEnabled))
             }
@@ -34,7 +42,7 @@ struct PrivacySettingsView: View {
             }
 
             SettingsCard(heading: "Chromium") {
-                SettingsRow(title: "Privacy and security", caption: "Cookies, HTTPS, site permissions and safe browsing are set in Chromium's own settings.") {
+                SettingsRow(title: "Privacy and security", caption: "Site permissions, safe browsing and the finer cookie controls are in Chromium's own settings.") {
                     SettingsButton(title: "Open…") { app.openFromSettings(URL(string: "chrome://settings/privacy")!) }
                 }
                 SettingsDivider()

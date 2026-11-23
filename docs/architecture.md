@@ -103,8 +103,15 @@ iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
   the Chrome bootstrap; Plinth flushes cookies, stops AppKit's loop and skips `CefShutdown` (which
   crashes in that state). Chromium may treat the next launch as after a crash.
 - **Background pages restored from the last session load only when first shown.**
-- Downloads are Plinth's own (saved to the Downloads folder or the one in Settings, shown in the
-  dock's downloads button, the sidebar and the shared downloads tray); Chromium's download bubble is off.
+- Downloads are Plinth's own (saved to the Downloads folder or the one in Settings, or where a save
+  panel says when "Ask where to save" is on; shown in the dock's downloads button, the sidebar and the
+  shared downloads tray); Chromium's download bubble is off. Risky file types are never opened
+  automatically, but the shared downloads tray has no warning row for them yet.
+- **Default page zoom changes take effect on the next launch.** Chromium reads
+  `partition.default_zoom_level` only at startup; Actual Size (⌘0) uses the new default at once.
+- **Global Privacy Control's `navigator.globalPrivacyControl` follows the switch only in renderers
+  started after a change** (the `Sec-GPC` header follows it at once). `profile.block_third_party_cookies`
+  no longer exists in Chromium 158; `profile.cookie_controls_mode` is used instead.
 - Not ported yet from the Mac app: Ask, split-view divider dragging, page snapshots on the shelf,
   content blocking (use an extension for now), and drag-and-drop between windows.
 - **No Chromium sandbox** (`no_sandbox`), no hardened runtime, no notarization, no Sparkle yet.

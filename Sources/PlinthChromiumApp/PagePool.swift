@@ -118,11 +118,17 @@ final class PagePool: NSObject, PCEFBrowserDelegate, PageNavigating {
     func canGoForward(_ page: PageID) -> Bool { browsers[page]?.canGoForward ?? false }
     func isLoading(_ page: PageID) -> Bool { browsers[page]?.isLoading ?? false }
 
+    /// The zoom level ⌘0 goes back to: the default page zoom from Settings.
+    var defaultZoomLevel: Double = 0
+
     /// Chromium zoom levels: each step is 20% (level 1 ≈ 120%).
     func zoom(_ page: PageID, by step: Double) {
         guard let b = browsers[page] else { return }
-        b.zoomLevel = step == 0 ? 0 : min(max(b.zoomLevel + step, -5), 9)
+        b.zoomLevel = step == 0 ? defaultZoomLevel : min(max(b.zoomLevel + step, -5), 9)
     }
+
+    /// Back to the default page zoom (Actual Size).
+    func resetZoom(_ page: PageID) { zoom(page, by: 0) }
 
     // MARK: Page text
 

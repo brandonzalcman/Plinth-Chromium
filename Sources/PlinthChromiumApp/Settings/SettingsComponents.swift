@@ -275,3 +275,45 @@ struct SettingsTextField: View {
             .accessibilityLabel(label)
     }
 }
+
+/// A minus / value / plus control with an optional Reset, as on the Mac.
+struct SettingsStepper: View {
+    var label: String
+    var valueText: String
+    var isDefault: Bool
+    var canDecrement: Bool
+    var canIncrement: Bool
+    var decrement: () -> Void
+    var increment: () -> Void
+    var reset: () -> Void
+    @Environment(\.settingsTheme) private var t
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if !isDefault {
+                Button("Reset", action: reset).buttonStyle(.plain).font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(t.accentText).accessibilityLabel("Reset \(label) to default")
+            }
+            HStack(spacing: 0) {
+                stepButton("minus", enabled: canDecrement, name: "Decrease \(label)", action: decrement)
+                Text(valueText).font(.system(size: 12.5, weight: .medium).monospacedDigit()).foregroundStyle(t.p.primary)
+                    .frame(minWidth: 54).accessibilityHidden(true)
+                stepButton("plus", enabled: canIncrement, name: "Increase \(label)", action: increment)
+            }
+            .padding(2)
+            .background(Capsule().fill(t.p.fill))
+            .overlay(Capsule().strokeBorder(t.p.border, lineWidth: 0.5))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+        .accessibilityValue(valueText)
+    }
+
+    private func stepButton(_ symbol: String, enabled: Bool, name: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .bold)).foregroundStyle(t.p.primary)
+                .frame(width: 26, height: 24).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.35).accessibilityLabel(name)
+    }
+}

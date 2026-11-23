@@ -117,7 +117,8 @@ iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
 - Shelf snapshots come from Chromium's DevTools screenshot (`Page.captureScreenshot`), which can't
   picture a hidden page, so the page on screen is pictured shortly after it's shown or finishes loading
   (Snapshots.swift). A page that was never on screen has no snapshot.
-- **No Chromium sandbox** (`no_sandbox`), no hardened runtime, no notarization, no Sparkle yet.
+- **No Chromium sandbox** (`no_sandbox`). Releases (`Scripts/release.sh`) are Developer ID signed with the
+  hardened runtime, notarized, and update with Sparkle from the public repo brandonzalcman/plinth-chromium-releases.
 - On-device AI (Foundation Models, as on the Mac) drives semantic history and the resume card's summary.
   Page text comes from the shared reader script, evaluated in the page's main frame by Plinth's renderer
   helper (`-[PCEFBrowser evaluateJavaScript:completion:]`, a process message to `PlinthChromiumHelper`),

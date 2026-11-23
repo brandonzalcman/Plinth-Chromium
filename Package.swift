@@ -15,6 +15,7 @@ let package = Package(
     dependencies: [
         // The shared Plinth logic (PlinthCore) and the macOS bar and panels (PlinthMacUI).
         .package(url: "https://github.com/brandonzalcman/Plinth.git", branch: "claude/plinthcore-product"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.1"),
     ],
     targets: [
         // CEF's C++ wrapper library (libcef_dll_wrapper), built from the downloaded distribution.
@@ -61,7 +62,13 @@ let package = Package(
             resources: [.copy("Resources/Fonts")],
             swiftSettings: ui
         ),
-        .executableTarget(name: "PlinthChromium", dependencies: ["PlinthChromiumApp"], swiftSettings: ui),
+        // Sparkle (auto-updates) lives only in the app's entry point; Scripts/bundle.sh embeds the framework.
+        .executableTarget(
+            name: "PlinthChromium",
+            dependencies: ["PlinthChromiumApp", .product(name: "Sparkle", package: "Sparkle")],
+            swiftSettings: ui,
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
+        ),
 
         .testTarget(name: "PlinthSidebarTests", dependencies: ["PlinthSidebar", .product(name: "PlinthCore", package: "Plinth"), .product(name: "PlinthMacUI", package: "Plinth")]),
         .testTarget(name: "PlinthExtensionsTests", dependencies: ["PlinthExtensions"]),

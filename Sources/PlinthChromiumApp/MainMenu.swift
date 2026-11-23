@@ -8,6 +8,9 @@ enum MainMenu {
 
         let appMenu = submenu(main, "Plinth")
         add(appMenu, "About Plinth", #selector(ChromiumApp.menuAbout(_:)), "", target: app)
+        if ChromiumApp.checkForUpdates != nil {
+            add(appMenu, "Check for Updates…", #selector(ChromiumApp.menuCheckForUpdates(_:)), "", target: app)
+        }
         add(appMenu, "Show Welcome Guide", #selector(ChromiumApp.menuShowWelcome(_:)), "", target: app)
         appMenu.addItem(.separator())
         add(appMenu, "Settings…", #selector(ChromiumApp.menuSettings(_:)), ",", target: app)

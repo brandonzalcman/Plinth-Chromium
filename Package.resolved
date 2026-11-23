@@ -1,5 +1,5 @@
 {
-  "originHash" : "1566955971e2d298e3daa4a53eb082655c4f9f687da1ae2738ef1b0f6e9ab54f",
+  "originHash" : "25fd746ba745eb624a85be672f5fa437ee5cab9206d99c6ebe2babf0276710f7",
   "pins" : [
     {
       "identity" : "plinth",
@@ -8,6 +8,15 @@
       "state" : {
         "branch" : "claude/plinthcore-product",
         "revision" : "c4cbdbed18a8b10a30dac30abe76240a4d41483d"
+      }
+    },
+    {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "ab7d71291238df6e0492143b120c9b696a35f603",
+        "version" : "2.10.1"
       }
     }
   ],

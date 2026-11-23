@@ -47,3 +47,10 @@ CEF lifecycle. `Scripts/dev/shoot.swift <pid> <out.png>` captures only that app'
 | `PlinthChromium` | The executable |
 
 See [docs/architecture.md](docs/architecture.md) for how pages are shown, why, and what's still missing.
+
+## Releasing
+
+`Scripts/release.sh <version>` builds a Developer ID signed, notarized DMG and a signed Sparkle feed in
+`build/release/`. Publish both in the public repo brandonzalcman/plinth-chromium-releases as release `v<version>`,
+with the notes from `release-notes/<version>.md`. It needs a Developer ID certificate, the notary profile
+`plinth-notary` (`xcrun notarytool store-credentials plinth-notary`) and Sparkle's key in your login keychain.

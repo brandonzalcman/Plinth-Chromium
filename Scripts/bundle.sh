@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Builds Plinth Chromium and assembles a runnable, ad-hoc signed app bundle:
-#   build/Plinth Chromium.app
+#   build/Plinth Chromium.app (or $OUT_DIR/Plinth Chromium.app)
 #     Contents/MacOS/Plinth Chromium
 #     Contents/Frameworks/Chromium Embedded Framework.framework
 #     Contents/Frameworks/Plinth Chromium Helper{, (GPU), (Renderer), (Plugin), (Alerts)}.app
@@ -37,15 +37,21 @@ if [[ -n "$PROFILE" && "$IDENTITY" == "-" ]]; then
 fi
 NAME="Plinth Chromium"
 BUNDLE_ID="dev.getplinth.chromium"
-VERSION="0.1.0"
-BUILD_NUMBER="1"
+VERSION="${VERSION:-0.1.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
+# Where the app goes (release builds use build/release, so a copy you're running in build/ is left alone).
+OUT_DIR="${OUT_DIR:-build}"
+# Auto-updates: both set for releases (Scripts/release.sh); without them the app never checks.
+SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-}"
+SPARKLE_FEED_URL="${SPARKLE_FEED_URL:-}"
 
 Scripts/fetch-cef.sh >/dev/null
 swift build -c "$CONFIG" --product PlinthChromium
 swift build -c "$CONFIG" --product PlinthChromiumHelper
 BIN="$(swift build -c "$CONFIG" --show-bin-path)"
 
-APP="build/$NAME.app"
+mkdir -p "$OUT_DIR"
+APP="$OUT_DIR/$NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN/PlinthChromium" "$APP/Contents/MacOS/$NAME"
@@ -53,9 +59,10 @@ for bundle in "$BIN"/*.bundle(N); do cp -R "$bundle" "$APP/Contents/Resources/";
 [[ -f Scripts/Plinth.icns ]] && cp Scripts/Plinth.icns "$APP/Contents/Resources/Plinth.icns"
 ditto "Vendor/cef/Release/Chromium Embedded Framework.framework" \
       "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+ditto "$BIN/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 
 plist() {   # plist <path> <executable> <identifier> <is-helper>
-  local agent="" types=""
+  local agent="" types="" updates=""
   [[ "$4" == "1" ]] && agent="<key>LSUIElement</key><true/>"
   # The sidebar's drag payloads (sites, pages, pins). macOS drops drags of undeclared types.
   [[ "$4" == "0" ]] && types="<key>UTExportedTypeDeclarations</key><array>
@@ -66,6 +73,11 @@ plist() {   # plist <path> <executable> <identifier> <is-helper>
       <key>UTTypeDescription</key><string>Plinth pin</string>
       <key>UTTypeConformsTo</key><array><string>public.data</string></array></dict>
   </array>"
+  if [[ "$4" == "0" && -n "$SPARKLE_PUBLIC_KEY" && -n "$SPARKLE_FEED_URL" ]]; then
+    updates="<key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
+  <key>SUFeedURL</key><string>$SPARKLE_FEED_URL</string>
+  <key>SUEnableAutomaticChecks</key><true/>"
+  fi
   cat > "$1" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -97,6 +109,7 @@ plist() {   # plist <path> <executable> <identifier> <is-helper>
   </dict></array>
   $agent
   $types
+  $updates
 </dict></plist>
 PLIST
 }
@@ -115,6 +128,7 @@ done
 # Sign inside out: the framework, the helpers, then the app.
 if [[ "$IDENTITY" == "-" ]]; then
   codesign --force --sign - "$APP/Contents/Frameworks/Chromium Embedded Framework.framework" >/dev/null 2>&1
+  codesign --force --deep --sign - "$APP/Contents/Frameworks/Sparkle.framework" >/dev/null 2>&1
   for helper in "$APP"/Contents/Frameworks/*Helper*.app(N); do codesign --force --sign - "$helper" >/dev/null 2>&1; done
   codesign --force --sign - "$APP" >/dev/null 2>&1
 else
@@ -126,7 +140,7 @@ else
   fi
   app_entitlements=()
   if [[ -n "$PROFILE" ]]; then
-    decoded="build/profile.plist"
+    decoded="$OUT_DIR/profile.plist"
     security cms -D -i "$PROFILE" > "$decoded"
     pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$decoded" 2>/dev/null; }
     TEAM_ID="$(pb TeamIdentifier:0)"
@@ -139,7 +153,7 @@ else
       echo "The profile doesn't include the iCloud container iCloud.dev.getplinth.Plinth." >&2
       exit 65
     fi
-    entitlements="build/PlinthChromium.entitlements"
+    entitlements="$OUT_DIR/PlinthChromium.entitlements"
     sed "s/TEAM_ID/$TEAM_ID/g" Signing/PlinthChromium.entitlements > "$entitlements"
     # A Developer ID (distribution) profile talks to CloudKit's Production environment; a development one
     # (it allows a debugger) to Development.
@@ -154,6 +168,13 @@ else
     echo "Signing without a provisioning profile: this build has no iCloud." >&2
   fi
   codesign --force --sign "$IDENTITY" "${runtime[@]}" "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+  # Sparkle's own pieces first, as its docs say (the Downloader keeps its entitlements).
+  sparkle="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+  codesign --force --sign "$IDENTITY" "${runtime[@]}" "$sparkle/XPCServices/Installer.xpc"
+  codesign --force --sign "$IDENTITY" "${runtime[@]}" --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
+  codesign --force --sign "$IDENTITY" "${runtime[@]}" "$sparkle/Autoupdate"
+  codesign --force --sign "$IDENTITY" "${runtime[@]}" "$sparkle/Updater.app"
+  codesign --force --sign "$IDENTITY" "${runtime[@]}" "$APP/Contents/Frameworks/Sparkle.framework"
   for helper in "$APP"/Contents/Frameworks/*Helper*.app(N); do
     codesign --force --sign "$IDENTITY" "${runtime[@]}" "${helper_entitlements[@]}" "$helper"
   done

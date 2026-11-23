@@ -81,6 +81,11 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     // MARK: Entry point
 
     /// Starts Chromium and runs the app. Called from the executable's main.swift.
+    /// Set by the app's entry point when the build can update itself (Sparkle); nil otherwise.
+    public static var checkForUpdates: (() -> Void)?
+
+    @objc func menuCheckForUpdates(_ sender: Any?) { Self.checkForUpdates?() }
+
     public static func main() {
         let application = PCEFApplication.shared as! PCEFApplication
         Brand.registerFonts()

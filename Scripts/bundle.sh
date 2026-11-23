@@ -167,6 +167,11 @@ else
   else
     echo "Signing without a provisioning profile: this build has no iCloud." >&2
   fi
+  # The framework's own libraries (GL, Vulkan, the sandbox) are signed one by one first; notarization
+  # rejects any that keep CEF's signature.
+  for lib in "$APP/Contents/Frameworks/Chromium Embedded Framework.framework/Libraries"/*.dylib(N); do
+    codesign --force --sign "$IDENTITY" "${runtime[@]}" "$lib"
+  done
   codesign --force --sign "$IDENTITY" "${runtime[@]}" "$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
   # Sparkle's own pieces first, as its docs say (the Downloader keeps its entitlements).
   sparkle="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"

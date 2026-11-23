@@ -75,6 +75,13 @@ enum DebugSteps {
             app.keyController?.openCommandBar(newPage: true)
         case "shelf":
             app.keyController?.toggleShelf()
+        case "clearshelf":
+            app.clearShelf()
+        case "undoshelf":
+            app.undoClearShelf()
+        case "ask":
+            app.keyController?.openAsk()
+            if !arg.isEmpty { app.keyController?.ask(arg) }
         case "close":
             app.keyController?.dismissPanel()
         case "extensions":

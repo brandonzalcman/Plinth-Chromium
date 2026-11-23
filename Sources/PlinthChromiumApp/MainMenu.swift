@@ -47,6 +47,7 @@ enum MainMenu {
         add(edit, "Select All", #selector(NSText.selectAll(_:)), "a")
         edit.addItem(.separator())
         add(edit, "Find…", #selector(ChromiumApp.menuFind(_:)), "f", target: app)
+        add(edit, "Ask About This Page…", #selector(ChromiumApp.menuAsk(_:)), "j", target: app)
 
         let view = submenu(main, "View")
         add(view, "Reload Page", #selector(ChromiumApp.menuReload(_:)), "r", target: app)

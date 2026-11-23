@@ -42,8 +42,8 @@ struct LoyaltySnapshot: Equatable {
     var syncIsOn = false
 }
 
-/// Maps the app's state to the loyalty events it earns, as the Mac app does. The Chromium build has
-/// no Ask yet, so the first-Ask milestone cannot be reached here.
+/// Maps the app's state to the loyalty events it earns, as the Mac app does. The first-Ask milestone
+/// is earned when an answer comes back (Ask.swift).
 enum LoyaltyEarning {
     /// The events for one tick (at launch, on activation and every few seconds while Plinth is active).
     /// Repeats are free: the engine pays a day once and a milestone once.

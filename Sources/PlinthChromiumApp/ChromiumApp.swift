@@ -51,6 +51,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored var loyalty: LoyaltyController!
     /// On-device AI: resume card summaries and semantic history (see SemanticHistory.swift).
     @ObservationIgnored var ai: AIService!
+    /// Ends the Undo window after "Clear all" on the shelf (ShelfAndSuggestions.swift).
+    @ObservationIgnored var shelfUndoTask: Task<Void, Never>?
     /// History entries already sent to the semantic index this run.
     @ObservationIgnored var indexedHistory = Set<UUID>()
     /// Windows for links from other apps (see MiniWindow.swift).
@@ -457,6 +459,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @objc func menuOpenLocation(_ sender: Any?) { keyController?.openCommandBar(newPage: false) }
     @objc func menuShelf(_ sender: Any?) { keyController?.toggleShelf() }
     @objc func menuFind(_ sender: Any?) { keyController?.openFind() }
+    @objc func menuAsk(_ sender: Any?) { if keyMiniWindow == nil { keyController?.openAsk() } }
     @objc func menuClosePage(_ sender: Any?) {
         if let mini = keyMiniWindow { mini.window.performClose(nil); return }
         guard let id = keyWindowID, let controller = controllers[id] else { NSApp.keyWindow?.performClose(nil); return }

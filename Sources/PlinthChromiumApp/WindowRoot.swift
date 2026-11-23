@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import PlinthAI
 import PlinthBarUI
 import PlinthModel
 import PlinthPanels
@@ -329,6 +330,9 @@ struct PanelLayer: View {
                         return app.bookmarks.results(for: query, amid: app.store.suggestions(for: query, limit: 7))
                     },
                     semanticResults: { query in await app.semanticResults(for: query) },
+                    searchSuggestions: { query in
+                        await app.searchSuggestions(for: query, isPrivate: controller.isPrivate)
+                    },
                     icon: { app.pool.favicons.image(for: $0) },
                     onSubmit: { controller.submit($0) },
                     onDismiss: { controller.dismissPanel() }
@@ -355,7 +359,9 @@ struct PanelLayer: View {
                     onDismiss: { controller.dismissPanel() },
                     semanticResults: { query in await app.semanticResults(for: query) },
                     onOpenResult: { controller.submit(.result($0)) },
-                    onClearAll: { app.store.clearShelf() }
+                    onClearAll: { app.clearShelf() },
+                    undoCount: app.store.clearedShelfPageCount,
+                    onUndoClear: { app.undoClearShelf() }
                 )
                 .offset(x: centreX - size.width / 2)
                 .padding(.bottom, lift)
@@ -397,6 +403,31 @@ struct PanelLayer: View {
                     .offset(x: centreX - size.width / 2)
                     .padding(.bottom, lift)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        case .ask:
+            ZStack(alignment: .bottom) {
+                Dimmer { controller.dismissPanel() }
+                AskPanelView(
+                    scopes: controller.askScopes(),
+                    selectedScope: Binding(get: { chrome.askScope }, set: { chrome.askScope = $0 }),
+                    answer: chrome.askAnswer,
+                    isStreaming: chrome.askStreaming,
+                    message: chrome.askMessage,
+                    canTurnOn: app.ai.availability == .turnedOff,
+                    accent: accent,
+                    initialQuestion: chrome.askQuestion,
+                    onAsk: { controller.ask($0) },
+                    onStop: { controller.stopAsk() },
+                    onTurnOn: {
+                        app.ai.setEnabled(true)
+                        app.ai.refreshAvailability()
+                        chrome.askMessage = BrowserWindowController.askMessage(for: app.ai.availability)
+                    },
+                    onDismiss: { controller.dismissPanel() }
+                )
+                .offset(x: centreX - size.width / 2)
+                .padding(.bottom, lift)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         case .find:
             ZStack(alignment: .bottom) {

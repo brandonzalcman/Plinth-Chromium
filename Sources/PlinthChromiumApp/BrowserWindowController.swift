@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import PlinthAI
 import PlinthCEF
 import PlinthModel
 import PlinthPanels
@@ -22,6 +23,8 @@ final class WindowChrome {
         case bookmarks
         /// The card shown after ⌘D (see Bookmarks.swift).
         case bookmark(id: UUID, isNew: Bool)
+        /// Ask About This Page (⌘J, see Ask.swift).
+        case ask
     }
 
     var panel: Panel = .none
@@ -43,6 +46,12 @@ final class WindowChrome {
     var resumeCard: ResumeCard?
     /// The page inside the peek card, in view coordinates, once its window is showing (Peek/).
     var peekPage: CGRect?
+    // Ask (Ask.swift).
+    var askScope: AskScope = .page
+    var askAnswer = ""
+    var askStreaming = false
+    var askMessage: String?
+    var askQuestion = ""
 }
 
 /// A clear window above the pages that holds what floats over them: the panels and the sidebar's
@@ -77,6 +86,8 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     var lastResumeCardSize: CGSize = .zero
     /// The link preview over the page, while one is showing (Peek/PeekWindowFeatures.swift).
     var peek: PeekController?
+    /// The answer being written for Ask.
+    var askTask: Task<Void, Never>?
 
     init(app: ChromiumApp, windowID: WindowID) {
         self.app = app
@@ -362,6 +373,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
     @discardableResult
     func dismissPanel() -> Bool {
         guard chrome.panel != .none else { return false }
+        if chrome.panel == .ask { stopAsk() }
         if chrome.panel == .find, let id = shown.first { app.pool.existing(id)?.stopFinding() }
         withAnimation(.easeOut(duration: 0.18)) { chrome.panel = .none }
         syncOverlay()

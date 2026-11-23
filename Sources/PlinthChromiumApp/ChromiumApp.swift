@@ -167,6 +167,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         if let folder = env["PLINTH_DOWNLOADS"] ?? settings.value.downloadFolder, !folder.isEmpty {
             PCEFRuntime.downloadsDirectory = folder
         }
+        downloads.opensSafeFiles = { [weak self] in self?.settings.value.openSafeFilesAfterDownload ?? false }
+        applyChromiumSettings(settings.value, previous: nil)
         connect()
         setUpPasswords()
         setUpLoyalty()
@@ -228,9 +230,27 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         if old.appearance != new.appearance { NSApp.appearance = Self.appearance(new.appearance) }
         if old.accent != new.accent { accentChoice = new.accent }
         applyAISettings(new)
+        applyChromiumSettings(new, previous: old)
         if old.fadeBehavior != new.fadeBehavior {
             store.setFader(Self.fader(for: new.fadeBehavior))
             scheduleFade()
+        }
+    }
+
+    /// Privacy, page and download settings that Chromium carries out. `previous` is nil at launch.
+    private func applyChromiumSettings(_ new: AppSettings, previous old: AppSettings?) {
+        if old.map({ ChromiumPreferences.differ($0, new) }) ?? true {
+            ChromiumPreferences.apply(new, to: .shared)
+            for profile in privateProfiles.values { ChromiumPreferences.apply(new, to: profile) }
+        }
+        pool.defaultZoomLevel = ChromiumPreferences.zoomLevel(forFactor: new.defaultZoom)
+        PCEFRuntime.globalPrivacyControl = new.globalPrivacyControl
+        PCEFRuntime.saveLocationChooser = new.askWhereToSave ? { suggested, decide in
+            MainActor.assumeIsolated { DownloadsModel.chooseSaveLocation(suggested: suggested, decide: decide) }
+        } : nil
+        if let old, old.downloadFolder != new.downloadFolder, ProcessInfo.processInfo.environment["PLINTH_DOWNLOADS"] == nil {
+            PCEFRuntime.downloadsDirectory = new.downloadFolder.flatMap { $0.isEmpty ? nil : $0 }
+                ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].path
         }
     }
 
@@ -285,6 +305,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             }
             if let profile = self.privateProfiles[window] { return profile }
             let profile = PCEFProfile.makePrivate()
+            ChromiumPreferences.apply(self.settings.value, to: profile)
             self.privateProfiles[window] = profile
             return profile
         }
@@ -504,7 +525,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     }
     @objc func menuZoomIn(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: 0.5) } }
     @objc func menuZoomOut(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: -0.5) } }
-    @objc func menuZoomReset(_ sender: Any?) { withSelectedPage { pool.zoom($0, by: 0) } }
+    @objc func menuZoomReset(_ sender: Any?) { withSelectedPage { pool.resetZoom($0) } }
     @objc func menuKeepSite(_ sender: Any?) {
         guard let id = keyWindowID, let window = store.window(id), let page = window.selectedPageID,
               let site = window.site(containing: page) else { return }

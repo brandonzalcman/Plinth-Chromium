@@ -3,6 +3,7 @@ import PlinthBrowserImport
 import PlinthModel
 import PlinthPasswords
 import PlinthRules
+import PlinthSettings
 import PlinthStore
 import PlinthSync
 
@@ -85,6 +86,46 @@ extension DebugSteps {
                 browser.evaluateJavaScript("(function(){var e=document.querySelector(\(Self.jsString(arg))); return e ? (e.type==='password' ? 'password:' + e.value.length : e.value) : 'none';})()") { done.resume(returning: $0) }
             }
             log("pwvalue \(arg): \(value.map { "\($0)" } ?? "nil")")
+        case "eval":
+            guard let page = selected(), let browser = app.pool.existing(page) else { log("eval: no page"); return true }
+            let value = await withCheckedContinuation { (done: CheckedContinuation<Any?, Never>) in
+                browser.evaluateJavaScript(arg) { done.resume(returning: $0) }
+            }
+            log("eval \(arg): \(value.map { "\($0)" } ?? "nil")")
+        case "private":
+            // private <url>: opens it in a new private window and logs its font size and GPC.
+            let window = store.createWindow(isPrivate: true)
+            app.showController(for: window)
+            guard let url = URL(string: arg) else { return true }
+            store.openPage(url: url, in: window)
+            try? await Task.sleep(for: .seconds(5))
+            guard let page = store.window(window)?.selectedPageID, let browser = app.pool.existing(page) else { log("private: no page"); return true }
+            let value = await withCheckedContinuation { (done: CheckedContinuation<Any?, Never>) in
+                browser.evaluateJavaScript("[getComputedStyle(document.body).fontSize, navigator.globalPrivacyControl, document.body.innerText].join(' ')") { done.resume(returning: $0) }
+            }
+            log("private: private=\(browser.profile.isPrivate) \(value.map { "\($0)" } ?? "nil")")
+        case "zoom":
+            // zoom [in|out|reset]: then logs the page's zoom level and the profile's default.
+            guard let page = selected(), let browser = app.pool.existing(page) else { log("zoom: no page"); return true }
+            switch arg {
+            case "in": app.pool.zoom(page, by: 0.5)
+            case "out": app.pool.zoom(page, by: -0.5)
+            case "reset": app.pool.resetZoom(page)
+            default: break
+            }
+            log("zoom: level=\(browser.zoomLevel) default=\(browser.defaultZoomLevel) settings=\(app.pool.defaultZoomLevel)")
+        case "setting":
+            // setting gpc|https|cookies|ask|open on|off, or setting zoom <factor>.
+            let on = arg.hasSuffix(" on")
+            switch arg.split(separator: " ").first {
+            case "gpc": app.settings.update { $0.globalPrivacyControl = on }
+            case "https": app.settings.update { $0.httpsOnly = on }
+            case "cookies": app.settings.update { $0.blockThirdPartyCookies = on }
+            case "ask": app.settings.update { $0.askWhereToSave = on }
+            case "open": app.settings.update { $0.openSafeFilesAfterDownload = on }
+            case "zoom": app.settings.update { $0.defaultZoom = Double(arg.split(separator: " ").last ?? "") ?? 1 }
+            default: log("setting: unknown \(arg)")
+            }
         case "sync":
             log("sync: state=\(app.syncState) running=\(app.sync != nil) canSync=\(app.canSync) devices=\(app.otherDevices.map { "\($0.deviceName)(\($0.pages.map(\.name).joined(separator: ",")))" }) error=\(app.sync?.lastError.map { "\($0)" } ?? "-")")
         case "syncon":

@@ -44,6 +44,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Folder new downloads are saved to (~/Downloads unless set).
 @property (class, copy) NSString *downloadsDirectory;
 + (void)cancelDownload:(uint32_t)identifier;
+/// Asks where to save each new download. It gets the path Plinth would use and must call `decide` once,
+/// on the main thread, with the chosen path, or nil to cancel the download. Nil saves straight away.
+@property (class, copy, nullable) void (^saveLocationChooser)(NSString *suggestedPath, void (^decide)(NSString *_Nullable path));
+/// Global Privacy Control: sends `Sec-GPC: 1` with every page request and makes
+/// `navigator.globalPrivacyControl` true in renderers started from now on.
+@property (class) BOOL globalPrivacyControl;
 /// Logs lifecycle steps to stderr when PLINTH_CEF_LOG is set.
 + (void)log:(NSString *)message;
 /// Unpacked extension folders to load at startup (Chromium's --load-extension), for development and tests.
@@ -78,6 +84,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (readonly) BOOL isPrivate;
 /// The profile's folder on disk (nil for a private profile).
 @property (readonly, nullable) NSString *path;
+/// Sets one Chromium preference. `value` is an NSNumber (bool, integer or double), an NSString, or an
+/// NSDictionary of those. Returns NO, and logs, when Chromium refuses it.
+- (BOOL)setPreference:(NSString *)name value:(id)value;
 @end
 
 typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
@@ -140,6 +149,8 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 @property (readonly) BOOL canGoBack;
 @property (readonly) BOOL canGoForward;
 @property (nonatomic) double zoomLevel;
+/// The profile's default zoom level (0 unless the profile's default zoom was changed).
+@property (readonly) double defaultZoomLevel;
 
 - (void)loadURL:(NSString *)url;
 - (void)goBack;

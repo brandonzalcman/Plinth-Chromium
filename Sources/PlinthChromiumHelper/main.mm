@@ -8,10 +8,13 @@
 // +[PCEFRuntime passwordScript]). The script gets a native `post` function and returns its fill
 // function; both stay here, never on `window`, so the page can neither send Plinth messages that look
 // like the person's input nor swap the fill function for one that keeps the password.
+//
+// With Global Privacy Control on, it also makes navigator.globalPrivacyControl true in every frame.
 #include <map>
 #include <string>
 
 #include "include/cef_app.h"
+#include "include/cef_command_line.h"
 #include "include/cef_render_process_handler.h"
 #include "include/cef_v8.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -69,6 +72,17 @@ std::map<std::string, FrameFill> gFills;
 
 bool IsWebAddress(const std::string &url) { return url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0; }
 
+/// Set by the browser process when it launched this renderer, so a change in Settings reaches
+/// renderers started after it (new sites and new pages), not ones already running.
+bool GlobalPrivacyControlOn() {
+    static const bool on = CefCommandLine::GetGlobalCommandLine()->HasSwitch("plinth-gpc");
+    return on;
+}
+
+const char *kGlobalPrivacyControlScript =
+    "Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', "
+    "{get() { return true; }, configurable: true, enumerable: true});";
+
 /// The script's `post`: sends one plain object to the browser process, from this frame.
 class PasswordPost : public CefV8Handler {
 public:
@@ -107,6 +121,11 @@ public:
 
     void OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                           CefRefPtr<CefV8Context> context) override {
+        if (GlobalPrivacyControlOn()) {
+            CefRefPtr<CefV8Value> ignored;
+            CefRefPtr<CefV8Exception> exception;
+            context->Eval(kGlobalPrivacyControlScript, CefString(), 0, ignored, exception);
+        }
         auto it = gPasswordConfigs.find(browser->GetIdentifier());
         if (it == gPasswordConfigs.end() || it->second.script.empty() || !IsWebAddress(frame->GetURL().ToString())) return;
         CefRefPtr<CefV8Value> factory;

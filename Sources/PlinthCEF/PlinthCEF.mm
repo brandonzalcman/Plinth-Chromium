@@ -2,6 +2,7 @@
 // C++ handlers point back at their Objective-C owners weakly.
 #import "PlinthCEF.h"
 
+#include <atomic>
 #include <crt_externs.h>
 #include <map>
 #include <set>
@@ -18,6 +19,7 @@
 #include "include/cef_process_message.h"
 #include "include/cef_values.h"
 #include "include/cef_request_context.h"
+#include "include/cef_resource_request_handler.h"
 #include "include/cef_version_info.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
@@ -244,7 +246,11 @@ static void (^gStrayHandler)(NSString *) = nil;
 static void (^gDownloadHandler)(PCEFDownload *) = nil;
 static NSString *gDownloadsDirectory = nil;
 static std::map<uint32_t, CefRefPtr<CefDownloadItemCallback>> gDownloadCallbacks;
-
+static void (^gSaveChooser)(NSString *, void (^)(NSString *)) = nil;
+/// Read on Chromium's IO and launcher threads too.
+static std::atomic<bool> gGlobalPrivacyControl{false};
+/// The renderer helper's switch for navigator.globalPrivacyControl (see PlinthChromiumHelper/main.mm).
+static const char *kGPCSwitch = "plinth-gpc";
 
 
 namespace {
@@ -337,6 +343,11 @@ public:
         }
     }
 
+    // Renderers read this once at start, so a change reaches renderers launched after it.
+    void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> commandLine) override {
+        if (gGlobalPrivacyControl) commandLine->AppendSwitch(kGPCSwitch);
+    }
+
 private:
     bool mockKeychain_;
     CefRefPtr<CefClient> strayClient_;
@@ -359,6 +370,10 @@ CefScopedLibraryLoader *gLoader = nullptr;
     return gDownloadsDirectory ?: [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES) firstObject];
 }
 + (void)setDownloadsDirectory:(NSString *)path { gDownloadsDirectory = [path copy]; }
++ (void (^)(NSString *, void (^)(NSString *)))saveLocationChooser { return gSaveChooser; }
++ (void)setSaveLocationChooser:(void (^)(NSString *, void (^)(NSString *)))chooser { gSaveChooser = [chooser copy]; }
++ (BOOL)globalPrivacyControl { return gGlobalPrivacyControl; }
++ (void)setGlobalPrivacyControl:(BOOL)on { gGlobalPrivacyControl = on; }
 + (void)cancelDownload:(uint32_t)identifier {
     auto it = gDownloadCallbacks.find(identifier);
     if (it != gDownloadCallbacks.end()) it->second->Cancel();
@@ -437,7 +452,41 @@ static void ApplyPlinthPreferences(CefRefPtr<CefRequestContext> context) {
     }
 }
 
+/// A Foundation value as a CefValue for SetPreference (nil when it has no CEF form).
+static CefRefPtr<CefValue> CefValueFromNSObject(id object) {
+    CefRefPtr<CefValue> value = CefValue::Create();
+    if ([object isKindOfClass:NSNumber.class]) {
+        NSNumber *n = object;
+        const char *type = n.objCType;
+        if (CFGetTypeID((__bridge CFTypeRef)n) == CFBooleanGetTypeID()) value->SetBool(n.boolValue);
+        else if (type[0] == 'd' || type[0] == 'f') value->SetDouble(n.doubleValue);
+        else value->SetInt(n.intValue);
+    } else if ([object isKindOfClass:NSString.class]) {
+        value->SetString(CefFromNSString(object));
+    } else if ([object isKindOfClass:NSDictionary.class]) {
+        CefRefPtr<CefDictionaryValue> dict = CefDictionaryValue::Create();
+        for (NSString *key in (NSDictionary *)object) {
+            CefRefPtr<CefValue> item = CefValueFromNSObject(((NSDictionary *)object)[key]);
+            if (!item || ![key isKindOfClass:NSString.class]) return nullptr;
+            dict->SetValue(CefFromNSString(key), item);
+        }
+        value->SetDictionary(dict);
+    } else {
+        return nullptr;
+    }
+    return value;
+}
+
 @implementation PCEFProfile
+
+- (BOOL)setPreference:(NSString *)name value:(id)object {
+    CefRefPtr<CefValue> value = CefValueFromNSObject(object);
+    CefString cefName = CefFromNSString(name), error;
+    bool ok = value && _context->CanSetPreference(cefName) && _context->SetPreference(cefName, value, error);
+    PLog([NSString stringWithFormat:@"pref %@ = %@ (%@): %@%@", name, object, self.isPrivate ? @"private" : @"shared",
+                                    ok ? @"set" : @"refused", error.empty() ? @"" : [@" " stringByAppendingString:NSStringFromCef(error)]]);
+    return ok;
+}
 
 + (PCEFProfile *)shared {
     static PCEFProfile *shared;
@@ -507,10 +556,33 @@ const std::set<int> &BlockedChromeCommands() {
     return blocked;
 }
 
-/// The client for a scripted popup's own window: it only needs to exist and count itself.
-class PopupClient : public CefClient, public CefLifeSpanHandler {
+/// Adds the Global Privacy Control header to requests while it is on.
+class PrivacySignalHandler : public CefResourceRequestHandler {
+public:
+    ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request,
+                                     CefRefPtr<CefCallback>) override {
+        if (gGlobalPrivacyControl) request->SetHeaderByName("Sec-GPC", "1", true);
+        return RV_CONTINUE;
+    }
+    IMPLEMENT_REFCOUNTING(PrivacySignalHandler);
+};
+
+/// The handler for a request (called on the IO thread): none while Global Privacy Control is off.
+CefRefPtr<CefResourceRequestHandler> PrivacySignals() {
+    static CefRefPtr<CefResourceRequestHandler> handler = new PrivacySignalHandler();
+    return gGlobalPrivacyControl ? handler : nullptr;
+}
+
+/// The client for a scripted popup's own window: it counts itself and sends Plinth's privacy signals.
+class PopupClient : public CefClient, public CefLifeSpanHandler, public CefRequestHandler {
 public:
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                                                   CefRefPtr<CefRequest>, bool, bool, const CefString &,
+                                                                   bool &) override {
+        return PrivacySignals();
+    }
     void OnAfterCreated(CefRefPtr<CefBrowser>) override { gLiveBrowsers++; }
     void OnBeforeClose(CefRefPtr<CefBrowser>) override { NoteBrowserClosed(); }
     IMPLEMENT_REFCOUNTING(PopupClient);
@@ -535,14 +607,25 @@ public:
     CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
 
-    // Downloads: saved straight into Plinth's folder and reported to the shell.
+    // Downloads: saved into Plinth's folder (or where the person chose) and reported to the shell.
     bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem> item, const CefString &suggestedName,
                           CefRefPtr<CefBeforeDownloadCallback> callback) override {
         NSString *folder = gDownloadsDirectory.length ? gDownloadsDirectory
             : [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES) firstObject];
         [NSFileManager.defaultManager createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:nil];
         NSString *name = NSStringFromCef(suggestedName);
-        callback->Continue(CefFromNSString(UniquePath(folder, name.length ? name : @"Download")), false);
+        NSString *path = UniquePath(folder, name.length ? name : @"Download");
+        if (gSaveChooser) {
+            // Dropping the callback without calling it cancels the download.
+            __block CefRefPtr<CefBeforeDownloadCallback> pending = callback;
+            gSaveChooser(path, ^(NSString *chosen) {
+                if (!pending) return;
+                if (chosen.length) pending->Continue(CefFromNSString(chosen), false);
+                pending = nullptr;
+            });
+            return true;
+        }
+        callback->Continue(CefFromNSString(path), false);
         if (gDownloadHandler) gDownloadHandler(DownloadFrom(item));
         return true;
     }
@@ -608,6 +691,11 @@ public:
     }
 
     // Request
+    CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                                                   CefRefPtr<CefRequest>, bool, bool, const CefString &,
+                                                                   bool &) override {
+        return PrivacySignals();
+    }
     bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
                         bool userGesture, bool isRedirect) override {
         if (!frame->IsMain()) return false;
@@ -917,6 +1005,7 @@ static int gNextEvaluationID = 1;
 - (void)reload { if (_browser) _browser->Reload(); }
 - (void)stopLoading { if (_browser) _browser->StopLoad(); }
 
+- (double)defaultZoomLevel { return _browser ? _browser->GetHost()->GetDefaultZoomLevel() : 0; }
 - (double)zoomLevel { return _browser ? _browser->GetHost()->GetZoomLevel() : _pendingZoom; }
 - (void)setZoomLevel:(double)zoomLevel {
     _pendingZoom = zoomLevel;

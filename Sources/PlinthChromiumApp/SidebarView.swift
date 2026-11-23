@@ -44,9 +44,10 @@ struct SidebarHost: View {
             progress: selected.flatMap { app.pool.progress[$0] },
             groups: app.store.groups(in: windowID),
             suggestion: controller.isPrivate ? nil : app.store.groupSuggestion(for: windowID).map { suggestion in
-                AnyView(GroupSuggestionView(suggestion: suggestion, accent: app.accent(scheme), icon: { favicons.image(for: $0) },
-                                            onGroup: { app.store.showGroup(app.store.acceptSuggestion(suggestion), in: windowID) },
-                                            onNotNow: { app.store.dismissSuggestion(suggestion) }))
+                AnyView(SidebarGroupSuggestion(suggestion: suggestion, palette: palette, accent: app.accent(scheme),
+                                               icon: { favicons.image(for: $0) },
+                                               onGroup: { app.store.showGroup(app.store.acceptSuggestion(suggestion), in: windowID) },
+                                               onNotNow: { app.store.dismissSuggestion(suggestion) }))
             },
             focusedGroup: state?.focusedGroup,
             shelfCount: controller.isPrivate ? 0 : app.store.shelf.count,
@@ -156,7 +157,7 @@ struct SidebarView: View {
                     if !model.pins.isEmpty { pinned.padding(.horizontal, 10).padding(.top, 14) }
                     if !groups.isEmpty { groupChips.padding(.top, 14) }
                     if let suggestion {
-                        suggestion.scaleEffect(0.92, anchor: .leading).padding(.horizontal, 10).padding(.top, 12)
+                        suggestion.padding(.horizontal, 10).padding(.top, 12)
                             .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                     newPageRow
@@ -176,6 +177,8 @@ struct SidebarView: View {
             footer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Nothing inside (a long title, a wide card) may widen the sidebar and push it under the traffic lights.
+        .clipped()
     }
 
     private var header: some View {
@@ -948,4 +951,68 @@ struct PinDragItem: Codable, Transferable {
 extension UTType {
     static let plinthSite = UTType(exportedAs: "dev.getplinth.chromium.site")
     static let plinthPin = UTType(exportedAs: "dev.getplinth.chromium.pin")
+}
+
+/// "Group YouTube & Google?" sized for the sidebar column: the question wraps over two lines and the
+/// buttons sit under it, so it never asks for more width than the column has.
+struct SidebarGroupSuggestion: View {
+    let suggestion: GroupSuggestion
+    let palette: ShellPalette
+    let accent: Color
+    let icon: (SiteKey) -> NSImage?
+    let onGroup: () -> Void
+    let onNotNow: () -> Void
+
+    static func question(_ names: [String]) -> String {
+        let joined: String
+        switch names.count {
+        case 0: joined = "these sites"
+        case 1: joined = names[0]
+        default: joined = names.dropLast().joined(separator: ", ") + " & " + names[names.count - 1]
+        }
+        return "Group \(joined)?"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                HStack(spacing: -4) {
+                    ForEach(Array(suggestion.keys.prefix(3)), id: \.self) { key in
+                        Group {
+                            if let image = icon(key) { Image(nsImage: image).resizable().interpolation(.high) }
+                            else { Circle().fill(palette.hover) }
+                        }
+                        .frame(width: 16, height: 16)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                }
+                .padding(.top, 1)
+                Text(Self.question(suggestion.siteNames))
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(palette.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Button(action: onNotNow) {
+                    Text("Not now").font(.system(size: 12, weight: .medium)).foregroundStyle(palette.secondary)
+                        .padding(.horizontal, 10).frame(height: 24)
+                        .background(Capsule().fill(palette.hover)).contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle(scale: 0.95))
+                Button(action: onGroup) {
+                    Text("Group").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 12).frame(height: 24)
+                        .background(Capsule().fill(accent)).contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle(scale: 0.95))
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(palette.raised))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(palette.hairline, lineWidth: 1))
+    }
 }

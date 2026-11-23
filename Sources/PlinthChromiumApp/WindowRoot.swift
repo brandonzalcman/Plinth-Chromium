@@ -104,7 +104,8 @@ struct WindowRoot: View {
                             .offset(x: BarMetrics.standard.sideInset, y: size.height - BarMetrics.standard.barHeight - BarMetrics.standard.bottomInset)
                     case .sidebar:
                         SidebarHost(app: app, controller: controller, chrome: chrome, collapsed: g.sidebarCollapsed)
-                            .frame(width: g.sidebarColumnWidth, height: size.height)
+                            .frame(width: g.sidebarColumnWidth, height: size.height, alignment: .topLeading)
+                            .clipped()
                     }
                     // The sidebar shows loading on its Now card; the dock layout shows it along the page's top.
                     if g.layout == .dock {

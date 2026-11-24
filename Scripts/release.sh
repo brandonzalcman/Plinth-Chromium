@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Builds a release of Plinth Chromium: Developer ID signing with the hardened runtime → DMG →
 # notarization → Sparkle appcast. The DMG and feed are published in the public releases repo
-# (brandonzalcman/plinth-chromium-releases); this source repo stays private.
+# (brandonzalcman/plinth-chromium-releases), which holds only releases and the feed.
 #
 #   Scripts/release.sh 0.1.0
 #

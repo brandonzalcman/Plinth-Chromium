@@ -4,3 +4,9 @@ Vendor/
 .swiftpm/
 *.xcuserstate
 .DS_Store
+.claude/
+*.p8
+*.p12
+*.provisionprofile
+*.mobileprovision
+.env

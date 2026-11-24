@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/brandonzalcman/Plinth-Chromium/security/advisories/new
+    about: Please report security issues privately.
+  - name: Download Plinth Chromium
+    url: https://github.com/brandonzalcman/plinth-chromium-releases/releases/latest
+    about: Signed, notarized releases that update themselves.

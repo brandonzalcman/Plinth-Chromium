@@ -1,0 +1,53 @@
+name: CI
+
+# Builds and tests every pull request that touches code. Draft pull requests and ones that change
+# only documents are skipped.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "release-notes/**"
+      - "LICENSE"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run for the push before it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Versions
+        run: swift --version && sw_vers
+      # CEF is about 140 MB; keep it between runs, keyed on the version fetch-cef.sh pins.
+      - name: Restore CEF
+        uses: actions/cache@v6
+        with:
+          path: Vendor
+          key: cef-${{ runner.os }}-${{ hashFiles('Scripts/fetch-cef.sh') }}
+      - name: Fetch CEF
+        run: Scripts/fetch-cef.sh
+      - name: Restore the Swift build folder
+        uses: actions/cache@v6
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Bundle the app
+        run: Scripts/bundle.sh

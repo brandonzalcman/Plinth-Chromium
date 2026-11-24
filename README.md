@@ -1,56 +1,95 @@
 # Plinth Chromium
 
-Plinth on Chromium: the same calm, native macOS browser — pages named and grouped by website, pins
-and pin folders, groups, fading and the shelf — with Chromium's engine and Chrome extensions.
+A calm, native macOS browser built on Chromium, with Chrome extensions.
 
-It's a Swift/AppKit app that embeds Chromium through [CEF](https://github.com/chromiumembedded/cef)
-(Chrome style) behind a thin Objective-C++ bridge. Everything Plinth does with pages comes from the
-public [Plinth](https://github.com/brandonzalcman/Plinth) package (`PlinthCore` and `PlinthMacUI`),
-so tab, pin, folder and group behaviour is the Mac app's, not a copy of it.
+Plinth Chromium is [Plinth](https://github.com/brandonzalcman/Plinth) on Chromium's engine. Pages are named and grouped by website, sites you stop using fade onto a shelf, and there are pins, pin folders, groups and split view. It adds Chrome extensions, which the WebKit version of Plinth can't run.
 
-Pages live in the bottom dock (the Mac app's bar) or in a vertical sidebar, picked in
-**Settings → Pages** or **View → Pages in Sidebar / Pages in Bottom Dock**.
+**[Download the latest release](https://github.com/brandonzalcman/plinth-chromium-releases/releases/latest)**: a signed, notarized disk image that updates itself. It needs macOS 26 on Apple silicon.
 
-## Build and run
+## What it does
 
-Needs macOS 26 and Xcode 26 or later. On this Mac `xcode-select` points at the Command Line Tools, so
-`swift` needs `DEVELOPER_DIR`:
+- **Pages in a bottom dock or a sidebar.** The dock is the Mac app's bar. The sidebar keeps the address field at eye level, pins on a slab, sites as cards, and collapses to a rail. Switch in **Settings → Pages**.
+- **Fading and the shelf.** Sites you leave fade and are put away on the shelf, with a snapshot of each page. Bring them back from the shelf or the command bar.
+- **Pins, folders, groups and split view.** Drag a page onto another to split, and drag the divider to resize.
+- **Chrome extensions.** They run as they do in Chrome, with their buttons in Plinth's toolbar.
+- **On-device AI.** Ask about the page (⌘J), search history by meaning, and get a "where you left off" card when a site comes back. Nothing leaves the Mac.
+- **Import** bookmarks, history and passwords from Safari, Chrome, Firefox and other browsers on the Mac.
+- **Privacy settings:** always use HTTPS, block third-party cookies, and send Global Privacy Control.
+- Also: peek (⇧-click a link), a mini window for links from other apps, Points & Levels, and a welcome guide.
 
-```bash
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-Scripts/fetch-cef.sh      # once: downloads CEF 158 (macOS arm64, ~140 MB) into Vendor/cef
-Scripts/bundle.sh         # builds build/Plinth Chromium.app (ad-hoc signed; no iCloud)
-# Scripts/bundle.sh release --sign "<identity>" --profile <file.provisionprofile>   # with iCloud: docs/icloud-sync.md
-open "build/Plinth Chromium.app"
-swift test                # shared-logic tests (no Chromium needed)
-```
+[docs/architecture.md](docs/architecture.md) lists what isn't done yet.
 
-Test launches: `PLINTH_STORAGE=<dir>` uses a throwaway profile (and skips the Keychain prompt),
-`PLINTH_OPEN=<urls>` opens pages, `PLINTH_LAYOUT=dock|sidebar` picks the layout,
-`PLINTH_LOAD_EXTENSION=<folder>` loads an unpacked extension, `PLINTH_IMPORT_HOME=<folder>` points import at
-fixture browser data (with `PLINTH_IMPORT_SAFE_STORAGE=<made-up key>` for fixture logins; a scratch profile never
-asks the Keychain and keeps passwords in memory), `PLINTH_SYNC=memory` syncs a scratch profile with an in-memory server, and `PLINTH_STEPS="wait 3; state; …"`
-runs scripted steps (see `Sources/PlinthChromiumApp/DebugSteps.swift`). `PLINTH_CEF_LOG=1` logs the
-CEF lifecycle. `Scripts/dev/shoot.swift <pid> <out.png>` captures only that app's windows.
+## How it's built
 
-## Layout
+It's a Swift and AppKit app. It embeds Chromium through the [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) (CEF), in Chrome style so extensions work, behind a small Objective-C++ bridge. Plinth's behaviour for pages (naming, pins, folders, groups, fading, the shelf, sync and the AI features) comes from the public [Plinth](https://github.com/brandonzalcman/Plinth) package's `PlinthCore` and `PlinthMacUI` products. This repo adds the Chromium layer and the shell around it.
 
 | Target | What it is |
 | --- | --- |
 | `CEFWrapper` | CEF's C++ wrapper library, compiled from `Vendor/cef/libcef_dll` |
-| `PlinthCEF` | The Objective-C++ bridge: runtime, profiles, Chrome-style browsers in their own windows |
+| `PlinthCEF` | The Objective-C++ bridge: the runtime, profiles, and Chrome-style browsers in their own windows |
 | `PlinthChromiumHelper` | The helper executable for Chromium's GPU, renderer, utility and plugin processes |
-| `PlinthSidebar` | Pure logic for the sidebar (model, rail, intents → `BarAction`) |
+| `PlinthSidebar` | Pure logic for the sidebar (its model, the rail, and intents that become bar actions) |
 | `PlinthExtensions` | Reads installed extensions and their popups from the Chromium profile |
-| `PlinthBrowserImport` | Bookmark, history and password import from the other browsers on the Mac, and password CSVs |
-| `PlinthChromiumApp` | The app shell: store ↔ pages, windows, dock and sidebar, panels, menu, settings |
-| `PlinthChromium` | The executable |
+| `PlinthBrowserImport` | Bookmark, history and password import from other browsers, and password CSVs |
+| `PlinthChromiumApp` | The app shell: store and pages, windows, dock and sidebar, panels, menus, settings |
+| `PlinthChromium` | The executable, plus Sparkle for updates |
 
-See [docs/architecture.md](docs/architecture.md) for how pages are shown, why, and what's still missing.
+[docs/architecture.md](docs/architecture.md) explains how pages are shown and why, and [docs/icloud-sync.md](docs/icloud-sync.md) covers iCloud sync, which needs a build signed with an iCloud provisioning profile.
+
+## Build and run
+
+You need macOS 26 and Xcode 26 (Swift 6.2). If `swift` can't find the macOS SDK, set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+Download CEF once. This is about 140 MB, into `Vendor/cef`, and the download is checked against CEF's published checksum:
+
+```bash
+Scripts/fetch-cef.sh
+```
+
+Build the app. This makes `build/Plinth Chromium.app`, signed to run on your Mac only, with no iCloud and no updates:
+
+```bash
+Scripts/bundle.sh
+```
+
+Run it on a throwaway profile, so your own browsing data is never touched:
+
+```bash
+PLINTH_STORAGE=/tmp/plinth-chromium-dev "build/Plinth Chromium.app/Contents/MacOS/Plinth Chromium"
+```
+
+Run the tests. They cover the shared logic and don't need a running browser:
+
+```bash
+swift test
+```
+
+### Development switches
+
+| Variable | Effect |
+| --- | --- |
+| `PLINTH_STORAGE=<dir>` | Use a throwaway profile in that folder (and never ask the Keychain) |
+| `PLINTH_OPEN=<urls>` | Open these pages, comma-separated |
+| `PLINTH_LAYOUT=dock\|sidebar` | Start in that layout |
+| `PLINTH_LOAD_EXTENSION=<folder>` | Load an unpacked extension (try `Tests/Fixtures/test-extension`) |
+| `PLINTH_IMPORT_HOME=<folder>` | Point import at fixture browser data |
+| `PLINTH_SYNC=memory` | Sync with an in-memory server instead of iCloud |
+| `PLINTH_WELCOME=0` | Skip the welcome guide |
+| `PLINTH_CEF_LOG=1` | Log CEF's lifecycle |
+| `PLINTH_STEPS="wait 3; open https://example.com; state; quit"` | Run scripted steps, logged as `[steps]` lines (see `Sources/PlinthChromiumApp/DebugSteps.swift`) |
+
+`swift Scripts/dev/shoot.swift <pid> <out.png>` captures only that app's windows, for screenshots of a test run.
+
+## Contributing
+
+Bug reports, fixes and ideas are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). For security problems, see [SECURITY.md](SECURITY.md) and please don't open a public issue.
 
 ## Releasing
 
-`Scripts/release.sh <version>` builds a Developer ID signed, notarized DMG and a signed Sparkle feed in
-`build/release/`. Publish both in the public repo brandonzalcman/plinth-chromium-releases as release `v<version>`,
-with the notes from `release-notes/<version>.md`. It needs a Developer ID certificate, the notary profile
-`plinth-notary` (`xcrun notarytool store-credentials plinth-notary`) and Sparkle's key in your login keychain.
+Maintainers build releases with `Scripts/release.sh <version>`. It makes a Developer ID signed, notarized disk image and a signed [Sparkle](https://sparkle-project.org) update feed in `build/release/`. Both are published in [plinth-chromium-releases](https://github.com/brandonzalcman/plinth-chromium-releases) as release `v<version>`, with notes from `release-notes/<version>.md`. The script needs a Developer ID certificate, a notary profile (`xcrun notarytool store-credentials plinth-notary`) and the Sparkle signing key in the login keychain. None of these are in this repository.
+
+## License
+
+Plinth Chromium is free software under the [GNU General Public License v3](LICENSE), like Plinth. It includes or downloads third-party software under its own licences: Chromium and CEF, Sparkle, and the Space Grotesk font. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+"Plinth" and the Plinth mark are the project's name and logo. If you ship your own build, please give it a different name and icon.

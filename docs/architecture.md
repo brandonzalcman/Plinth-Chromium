@@ -88,7 +88,7 @@ shares the page's DOM and built-ins. Scripted popups (sign-in windows) don't get
 iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
 [icloud-sync.md](icloud-sync.md).
 
-## Known gaps (first cut)
+## Known gaps
 
 - **Extension popups don't see an active tab.** A popup runs in its own window, so
   `chrome.tabs.query({active: true, currentWindow: true})` doesn't return the page you're on; popups

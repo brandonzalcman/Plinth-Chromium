@@ -78,6 +78,15 @@ enum DebugSteps {
         case "divider":
             // divider <x>: drags the split divider to x points from the window's left edge.
             if let x = Double(arg), let c = app.keyController { c.dragSplitDivider(to: x); c.endSplitDividerDrag() }
+        case "dismiss":
+            app.keyController?.dismissPanel()
+        case "size":
+            // size <width> <height>: the key window's size in points, centred on its screen.
+            let wh = arg.split(separator: " ").compactMap { Double($0) }
+            if wh.count == 2, let w = app.keyController?.window {
+                w.setContentSize(NSSize(width: wh[0], height: wh[1]))
+                w.center()
+            }
         case "clearshelf":
             app.clearShelf()
         case "undoshelf":

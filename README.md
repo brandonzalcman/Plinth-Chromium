@@ -1,23 +1,78 @@
-# Plinth Chromium
+<p align="center">
+  <img src="docs/images/icon.png" width="128" height="128" alt="The Plinth icon: an arch on a slab, filled with a blue-to-peach sky">
+</p>
 
-A calm, native macOS browser built on Chromium, with Chrome extensions.
+<h1 align="center">Plinth Chromium</h1>
+
+<p align="center">
+  <b>A calm, native macOS browser on Chromium, with Chrome extensions.</b><br>
+  Pages grouped by website, sites that fade onto a shelf, and on-device AI, in a dock or a sidebar.
+</p>
+
+<p align="center">
+  <a href="https://github.com/brandonzalcman/plinth-chromium-releases/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/brandonzalcman/plinth-chromium-releases?label=download&color=2F5BEA"></a>
+  <img alt="macOS 26 or later" src="https://img.shields.io/badge/macOS-26%2B-1C1C1A">
+  <img alt="Apple silicon" src="https://img.shields.io/badge/Apple%20silicon-arm64-1C1C1A">
+  <a href="LICENSE"><img alt="License: GPL v3" src="https://img.shields.io/badge/license-GPL%20v3-D9D0BC"></a>
+  <a href="https://getplinth.dev"><img alt="Website: getplinth.dev" src="https://img.shields.io/badge/web-getplinth.dev-FFC9A3"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/brandonzalcman/plinth-chromium-releases/releases/latest"><b>Download</b></a> ·
+  <a href="https://getplinth.dev">Website</a> ·
+  <a href="#build-and-run">Build from source</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a> ·
+  <a href="https://github.com/brandonzalcman/Plinth">Plinth for WebKit</a>
+</p>
+
+<p align="center">
+  <img src="docs/images/sidebar.webp" width="860" alt="Plinth Chromium with its sidebar: the address field at the top, pinned sites on a slab, and site cards with their pages, beside swift.org">
+</p>
 
 Plinth Chromium is [Plinth](https://github.com/brandonzalcman/Plinth) on Chromium's engine. Pages are named and grouped by website, sites you stop using fade onto a shelf, and there are pins, pin folders, groups and split view. It adds Chrome extensions, which the WebKit version of Plinth can't run.
 
-**[Download the latest release](https://github.com/brandonzalcman/plinth-chromium-releases/releases/latest)**: a signed, notarized disk image that updates itself. It needs macOS 26 on Apple silicon.
+## Download
+
+**[Get the latest release](https://github.com/brandonzalcman/plinth-chromium-releases/releases/latest)**. Open the disk image and drag Plinth Chromium to Applications. It's signed and notarized by Apple and updates itself. You can also choose **Plinth → Check for Updates**.
+
+It needs macOS 26 on an Apple silicon Mac. Past versions and release notes are on the [releases page](https://github.com/brandonzalcman/plinth-chromium-releases/releases).
 
 ## What it does
 
-- **Pages in a bottom dock or a sidebar.** The dock is the Mac app's bar. The sidebar keeps the address field at eye level, pins on a slab, sites as cards, and collapses to a rail. Switch in **Settings → Pages**.
-- **Fading and the shelf.** Sites you leave fade and are put away on the shelf, with a snapshot of each page. Bring them back from the shelf or the command bar.
-- **Pins, folders, groups and split view.** Drag a page onto another to split, and drag the divider to resize.
-- **Chrome extensions.** They run as they do in Chrome, with their buttons in Plinth's toolbar.
-- **On-device AI.** Ask about the page (⌘J), search history by meaning, and get a "where you left off" card when a site comes back. Nothing leaves the Mac.
-- **Import** bookmarks, history and passwords from Safari, Chrome, Firefox and other browsers on the Mac.
-- **Privacy settings:** always use HTTPS, block third-party cookies, and send Global Privacy Control.
-- Also: peek (⇧-click a link), a mini window for links from other apps, Points & Levels, and a welcome guide.
+### Your pages, in a dock or a sidebar
 
-[docs/architecture.md](docs/architecture.md) lists what isn't done yet.
+<img src="docs/images/dock.webp" width="860" alt="Plinth Chromium with the bottom dock: back, forward and reload, pinned sites, the pages of each site, the shelf and the search button">
+
+The dock is the Mac app's bar. The sidebar puts the address field at eye level, pins on a slab and sites as cards, and collapses to a rail that flies out on hover. Pages are named and grouped by website, and the ones you leave fade gradually. Switch layouts in **Settings → Pages**.
+
+### Split view
+
+<img src="docs/images/split.webp" width="860" alt="Two pages side by side in split view, with the divider between them">
+
+Drag a page onto another to split, drag the divider to resize them, and double-click it to even them out.
+
+### Ask about the page
+
+<img src="docs/images/ask.webp" width="860" alt="The Ask panel answering a question about the swift.org page, with This page and All Swift pages to choose from">
+
+Press ⌘J to ask a question about this page, all of a site's pages, or both sides of a split. Apple's on-device model answers, so nothing leaves the Mac. The same model powers history search by meaning and the "where you left off" card when a site comes back.
+
+### The shelf
+
+<img src="docs/images/shelf.webp" width="860" alt="The shelf listing pages put away from Apple Developer and MDN, each with a snapshot">
+
+Sites you stop using are put away on the shelf, with a snapshot of each page, so the bar stays short. Search the shelf, bring a site back, or clear it (and undo that for a few seconds).
+
+### And more
+
+- **Chrome extensions** run as they do in Chrome, with their buttons in Plinth's toolbar.
+- **Pins and pin folders**: drag pins together to make a folder, shown as an icon or as a list.
+- **Groups**: Plinth notices sites you use together and offers to group them.
+- **Import** bookmarks, history and passwords from Safari, Chrome, Firefox and other browsers on the Mac.
+- **Privacy settings**: always use HTTPS, block third-party cookies, and send Global Privacy Control.
+- **Peek** (⇧-click a link), a mini window for links from other apps, Points & Levels, and a welcome guide.
+
+Not done yet: iCloud sync in released builds, a content blocker of its own (an extension works), and a few extension features. [docs/architecture.md](docs/architecture.md) lists them all.
 
 ## How it's built
 

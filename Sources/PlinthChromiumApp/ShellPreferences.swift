@@ -11,6 +11,8 @@ public struct ShellPreferences: Codable, Equatable, Sendable {
     public var sidebarCollapsed = false
     /// Pin folders the sidebar shows as a titled list of their pins rather than as one icon tile.
     public var listFolders: Set<UUID> = []
+    /// Group suggestions turned down with "Not now" (SuggestionSnooze.swift).
+    public var suggestionSnooze = SuggestionSnooze()
 
     public init() {}
 
@@ -20,6 +22,7 @@ public struct ShellPreferences: Codable, Equatable, Sendable {
         tabLayout = (try? c.decode(TabLayout.self, forKey: .tabLayout)) ?? .dock
         sidebarCollapsed = (try? c.decode(Bool.self, forKey: .sidebarCollapsed)) ?? false
         listFolders = (try? c.decode(Set<UUID>.self, forKey: .listFolders)) ?? []
+        suggestionSnooze = (try? c.decode(SuggestionSnooze.self, forKey: .suggestionSnooze)) ?? SuggestionSnooze()
     }
 }
 

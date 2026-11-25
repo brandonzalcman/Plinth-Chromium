@@ -234,10 +234,10 @@ struct DockAccessoryRow: View {
                                   onToggle: { focused == group.id ? store.setFocus(nil, in: windowID) : store.showGroup(group.id, in: windowID) },
                                   onRemove: { store.deleteGroup(group.id) })
                 }
-            } else if let suggestion = store.groupSuggestion(for: windowID) {
+            } else if let suggestion = app.visibleGroupSuggestion(for: windowID) {
                 GroupSuggestionView(suggestion: suggestion, accent: accent, icon: { app.pool.favicons.image(for: $0) },
                                     onGroup: { store.showGroup(store.acceptSuggestion(suggestion), in: windowID) },
-                                    onNotNow: { store.dismissSuggestion(suggestion) })
+                                    onNotNow: { app.notNow(suggestion) })
             }
             Spacer(minLength: 0)
         }

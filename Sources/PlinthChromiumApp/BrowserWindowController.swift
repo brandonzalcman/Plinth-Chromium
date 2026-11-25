@@ -187,7 +187,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
 
     /// The dock shows group chips, or a suggestion to make a group, in a row above the bar.
     var hasAccessories: Bool {
-        !app.store.groups(in: windowID).isEmpty || app.store.groupSuggestion(for: windowID) != nil
+        !app.store.groups(in: windowID).isEmpty || app.visibleGroupSuggestion(for: windowID) != nil
     }
 
     private var contentSize: CGSize { window.contentView?.bounds.size ?? window.frame.size }

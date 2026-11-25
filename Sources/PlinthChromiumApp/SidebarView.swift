@@ -43,11 +43,11 @@ struct SidebarHost: View {
             nav: nav,
             progress: selected.flatMap { app.pool.progress[$0] },
             groups: app.store.groups(in: windowID),
-            suggestion: controller.isPrivate ? nil : app.store.groupSuggestion(for: windowID).map { suggestion in
+            suggestion: app.visibleGroupSuggestion(for: windowID).map { suggestion in
                 AnyView(SidebarGroupSuggestion(suggestion: suggestion, palette: palette, accent: app.accent(scheme),
                                                icon: { favicons.image(for: $0) },
                                                onGroup: { app.store.showGroup(app.store.acceptSuggestion(suggestion), in: windowID) },
-                                               onNotNow: { app.store.dismissSuggestion(suggestion) }))
+                                               onNotNow: { app.notNow(suggestion) }))
             },
             focusedGroup: state?.focusedGroup,
             shelfCount: controller.isPrivate ? 0 : app.store.shelf.count,

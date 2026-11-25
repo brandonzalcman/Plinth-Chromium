@@ -1,4 +1,5 @@
 import Foundation
+import PlinthModel
 import PlinthRules
 
 /// "Clear all" on the shelf can be undone for a short while; after that the pages are gone for good.
@@ -42,4 +43,16 @@ extension ChromiumApp {
         config.urlCache = nil
         return URLSession(configuration: config)
     }()
+
+    /// The group suggestion to show in a window, if any: none in private windows or while "Not now" covers it.
+    func visibleGroupSuggestion(for window: WindowID) -> GroupSuggestion? {
+        guard !store.isPrivate(window: window), let suggestion = store.groupSuggestion(for: window) else { return nil }
+        return prefs.value.suggestionSnooze.hides(suggestion, now: Date()) ? nil : suggestion
+    }
+
+    /// "Not now": the store forgets this exact set for good, and similar ones are quiet for a day.
+    func notNow(_ suggestion: GroupSuggestion) {
+        prefs.update { $0.suggestionSnooze.notNow(suggestion, now: Date()) }
+        store.dismissSuggestion(suggestion)
+    }
 }

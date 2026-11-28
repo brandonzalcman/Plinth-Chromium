@@ -160,6 +160,13 @@ enum DebugSteps {
             app.menuAbout(nil)
         case "settings":
             app.showSettings()
+        case "videos":
+            log("videos: \(app.nativeVideo.debugState)")
+        case "eval":
+            // eval <expression>: logs the result (strings, numbers, JSON-able values) from the selected page.
+            guard let page = window()?.selectedPageID, let b = app.pool.existing(page) else { log("eval: no page"); return }
+            let value: Any? = await withCheckedContinuation { done in b.evaluateJavaScript(arg) { done.resume(returning: $0) } }
+            log("eval: \(value.map { String(describing: $0) } ?? "nil")")
         case "readtext":
             // The selected page's readable text, as semantic history and the resume card get it (lengths only).
             guard let page = window()?.selectedPageID else { log("readtext: no page"); return }

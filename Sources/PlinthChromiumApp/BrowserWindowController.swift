@@ -259,6 +259,7 @@ final class BrowserWindowController: NSObject, NSWindowDelegate, WindowPanels {
         syncPeek()
         keepOverlayOnTop()
         for id in chrome.attached.keys where !ids.contains(id) { chrome.attached[id] = nil }
+        app.nativeVideo.refreshAll()
 
         let name = app.store.window(windowID)?.selectedPageID.flatMap { app.store.page($0)?.name } ?? "Plinth"
         window.title = (isPrivate ? "Private — " : "") + name

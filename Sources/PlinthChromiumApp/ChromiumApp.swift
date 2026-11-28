@@ -55,6 +55,8 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
     @ObservationIgnored var shelfUndoTask: Task<Void, Never>?
     /// Pictures of pages for the shelf (Snapshots.swift).
     @ObservationIgnored var snapshots = PageSnapshots(directory: nil)
+    /// Videos this build can't decode, drawn by macOS over the page (NativeVideo/).
+    @ObservationIgnored let nativeVideo = NativeVideoController()
     /// History entries already sent to the semantic index this run.
     @ObservationIgnored var indexedHistory = Set<UUID>()
     /// Windows for links from other apps (see MiniWindow.swift).
@@ -97,6 +99,7 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
         }
         // Plinth's password script runs in every page from the start (see ChromiumPasswordScript.swift).
         PCEFRuntime.passwordScript = ChromiumPasswordScript.source
+        PCEFRuntime.mediaScript = NativeVideoScript.source
         PCEFRuntime.passwordScriptTestMode = env["PLINTH_STORAGE"] != nil && env["PLINTH_STEPS"] != nil
         let cefRoot = support.appendingPathComponent("Chromium", isDirectory: true).path
         // Plinth keeps its own session (state.json). Chromium's would reopen its windows behind Plinth's.
@@ -359,6 +362,12 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             if let window = self?.windowShowing(id) { self?.lastMainWindowID = window }
         }
         pool.callbacks.keyEquivalent = { event in NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false }
+        nativeVideo.browser = { [weak self] id in self?.pool.existing(id) }
+        nativeVideo.isPageShown = { [weak self] id in self?.controllers.values.contains { $0.shown.contains(id) } ?? false }
+        pool.callbacks.mediaMessage = { [weak self] page, body in
+            guard let message = NativeVideoMessage(body) else { return }
+            self?.nativeVideo.handle(message, page: page)
+        }
         pool.callbacks.passwordMessage = { [weak self] page, browser, message in
             self?.passwords.handle(message, from: page, browser: browser)
         }
@@ -376,10 +385,12 @@ public final class ChromiumApp: NSObject, NSApplicationDelegate {
             // Pages opened in the background start loading straight away, as on the Mac.
             if let page = store.page(id) { pool.browser(for: page) }
         case .pageClosed(let id):
+            nativeVideo.remove(id)
             pool.close(id)
             snapshots.remove(id)
             passwords.pageClosed(id)
         case .pagesShelved(let ids, let key):
+            ids.forEach(nativeVideo.remove)
             pool.close(ids)
             // Say where they went: pages that faded away should never just vanish.
             let name = store.shelf.first { $0.key == key }?.name ?? key.host

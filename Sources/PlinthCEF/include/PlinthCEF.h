@@ -62,6 +62,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (class, copy, nullable) NSString *passwordScript;
 /// Lets scripted events stand in for real input (scratch-profile test launches only).
 @property (class) BOOL passwordScriptTestMode;
+/// Plinth's media script (a function expression taking `post`). The renderer helper runs it in every http(s)
+/// frame before the page's own scripts; what it posts reaches `-browser:mediaMessage:frameURL:`. Used to hand
+/// videos this build can't decode (H.264, AAC) to macOS's own player. Set before the first browser is made.
+@property (class, copy, nullable) NSString *mediaScript;
 /// Runs until +quitMessageLoop. Returns after the last browser has closed.
 + (void)runMessageLoop;
 + (void)quitMessageLoop;
@@ -125,6 +129,8 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 /// hold what was typed into a login form; it must never be logged. `frameURL` is the frame's own address.
 - (void)browser:(PCEFBrowser *)browser passwordMessage:(NSDictionary *)message frame:(NSString *)frameID
        frameURL:(NSString *)frameURL isMainFrame:(BOOL)isMainFrame;
+/// A message from the media script in one of the page's frames (see `mediaScript`).
+- (void)browser:(PCEFBrowser *)browser mediaMessage:(NSDictionary *)message frameURL:(NSString *)frameURL;
 @end
 
 /// One page: a Chrome-style browser in a frameless window of its own.
@@ -173,6 +179,8 @@ typedef NS_ENUM(NSInteger, PCEFOpenDisposition) {
 /// `-browser:passwordMessage:…`). An empty password fills the user name alone. Fire and forget.
 - (void)fillPasswordInFrame:(NSString *)frameID token:(NSInteger)token username:(NSString *)username
                    password:(NSString *)password;
+/// Scrolls the page as a wheel at `point` (the page view's points, top-left origin) would.
+- (void)sendScrollAt:(NSPoint)point deltaX:(CGFloat)deltaX deltaY:(CGFloat)deltaY;
 /// The main frame's plain text (Chromium's own text dump, no structure), or nil.
 - (void)readPlainText:(void (^)(NSString *_Nullable text))completion;
 /// A JPEG of what the page shows (Chromium's DevTools screenshot), or nil if it can't be taken.

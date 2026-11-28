@@ -55,6 +55,7 @@ static const char *kEvalResultMessage = "plinth.eval.result";
 /// The password script's messages, and the fill sent back to it.
 static const char *kPasswordMessage = "plinth.pw";
 static const char *kPasswordFillMessage = "plinth.pw.fill";
+static const char *kMediaMessage = "plinth.media";
 /// How long a script's answer is waited for.
 static const int64_t kEvalTimeout = 6 * NSEC_PER_SEC;
 
@@ -241,6 +242,7 @@ static NSString *UniquePath(NSString *folder, NSString *name) {
 
 static NSArray<NSString *> *gUnpackedExtensions = @[];
 static NSString *gPasswordScript = nil;
+static NSString *gMediaScript;
 static BOOL gPasswordTestMode = NO;
 static void (^gStrayHandler)(NSString *) = nil;
 static void (^gDownloadHandler)(PCEFDownload *) = nil;
@@ -382,6 +384,8 @@ CefScopedLibraryLoader *gLoader = nullptr;
 + (NSString *)passwordScript { return gPasswordScript; }
 + (void)setPasswordScript:(NSString *)script { gPasswordScript = [script copy]; }
 + (BOOL)passwordScriptTestMode { return gPasswordTestMode; }
++ (NSString *)mediaScript { return gMediaScript; }
++ (void)setMediaScript:(NSString *)script { gMediaScript = [script copy]; }
 + (void)setPasswordScriptTestMode:(BOOL)on { gPasswordTestMode = on; }
 
 + (BOOL)startWithCachePath:(NSString *)cachePath mockKeychain:(BOOL)mockKeychain {
@@ -748,6 +752,18 @@ public:
                      frameURL:NSStringFromCef(frame->GetURL()) isMainFrame:frame->IsMain()];
             return true;
         }
+        if (message->GetName().ToString() == kMediaMessage) {
+            CefRefPtr<CefListValue> args = message->GetArgumentList();
+            PCEFBrowser *owner = owner_;
+            id<PCEFBrowserDelegate> delegate = owner.delegate;
+            if (!frame || args->GetSize() < 1 || args->GetType(0) != VTYPE_DICTIONARY ||
+                ![delegate respondsToSelector:@selector(browser:mediaMessage:frameURL:)]) return true;
+            id body = NSObjectFromCefValue(args->GetValue(0), 0);
+            if ([body isKindOfClass:NSDictionary.class]) {
+                [delegate browser:owner mediaMessage:body frameURL:NSStringFromCef(frame->GetURL())];
+            }
+            return true;
+        }
         if (message->GetName().ToString() != kEvalResultMessage) return false;
         CefRefPtr<CefListValue> args = message->GetArgumentList();
         if (args->GetSize() < 3) return true;
@@ -913,13 +929,14 @@ static int gNextEvaluationID = 1;
         _title = @"";
         _client = new BrowserClient(self);
         CefBrowserSettings settings;
-        // The renderer helper reads the password script from here (OnBrowserCreated's extra_info).
+        // The renderer helper reads the password and media scripts from here (OnBrowserCreated's extra_info).
         CefRefPtr<CefDictionaryValue> extra = nullptr;
+        if (gPasswordScript.length || gMediaScript.length) extra = CefDictionaryValue::Create();
         if (gPasswordScript.length) {
-            extra = CefDictionaryValue::Create();
             extra->SetString("plinth.passwords", CefFromNSString(gPasswordScript));
             extra->SetBool("plinth.passwords.test", gPasswordTestMode);
         }
+        if (gMediaScript.length) extra->SetString("plinth.media", CefFromNSString(gMediaScript));
         _browserView = CefBrowserView::CreateBrowserView(_client, CefFromNSString(url), settings, extra,
                                                          profile->_context, new BrowserViewDelegate(self));
         CefWindow::CreateTopLevelWindow(new HostWindowDelegate(self, _browserView));
@@ -1073,6 +1090,15 @@ static int gNextEvaluationID = 1;
     args->SetString(1, CefFromNSString(username));
     args->SetString(2, CefFromNSString(password));
     frame->SendProcessMessage(PID_RENDERER, message);
+}
+
+- (void)sendScrollAt:(NSPoint)point deltaX:(CGFloat)deltaX deltaY:(CGFloat)deltaY {
+    if (!_browser || _closed) return;
+    CefMouseEvent event;
+    event.x = (int)point.x;
+    event.y = (int)point.y;
+    event.modifiers = 0;
+    _browser->GetHost()->SendMouseWheelEvent(event, (int)deltaX, (int)deltaY);
 }
 
 - (void)readPlainText:(void (^)(NSString *))completion {

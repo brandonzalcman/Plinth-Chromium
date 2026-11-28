@@ -112,6 +112,15 @@ iCloud sync is `PlinthSync` on the Mac app's container, gated by `SyncGate`: see
 - **Global Privacy Control's `navigator.globalPrivacyControl` follows the switch only in renderers
   started after a change** (the `Sec-GPC` header follows it at once). `profile.block_third_party_cookies`
   no longer exists in Chromium 158; `profile.cookie_controls_mode` is used instead.
+- **No H.264 or AAC in the engine.** CEF's published builds leave out the patent-licensed codecs, so
+  `<video>`, Media Source and WebCodecs all refuse them. Plinth hands those videos to macOS: the media script
+  (NativeVideo/NativeVideoScript.swift, run by the renderer helper in the main frame) reports each video that
+  fails with "format not supported", with its file (or, on X, the MP4 its API lists) and its place on screen,
+  every frame while it moves. NativeVideoController draws it with AVFoundation in a borderless child window of
+  the page's window, cut to the visible part with the page's rounded corners, with macOS's floating controls;
+  it autoplays muted where the site does (X), pauses off screen and hands scrolling back to the page. Streams
+  with no plain file (some live replays) still don't play. Compiling CEF with `proprietary_codecs` would make
+  all of this unnecessary.
 - Not ported yet from the Mac app: content blocking (use an extension for now) and drag-and-drop
   between windows.
 - Shelf snapshots come from Chromium's DevTools screenshot (`Page.captureScreenshot`), which can't

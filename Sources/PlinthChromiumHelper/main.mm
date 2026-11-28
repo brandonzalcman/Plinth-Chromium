@@ -102,11 +102,35 @@ private:
     IMPLEMENT_REFCOUNTING(PasswordPost);
 };
 
+/// The media script for each browser (from OnBrowserCreated's extra_info).
+std::map<int, std::string> gMediaScripts;
+
+/// The media script's private `post`: sends one dictionary to the browser process as "plinth.media".
+class MediaPost : public CefV8Handler {
+public:
+    explicit MediaPost(CefRefPtr<CefFrame> frame) : frame_(frame) {}
+    bool Execute(const CefString &, CefRefPtr<CefV8Value>, const CefV8ValueList &arguments, CefRefPtr<CefV8Value> &,
+                 CefString &) override {
+        if (arguments.size() != 1 || !arguments[0]->IsObject()) return true;
+        CefRefPtr<CefValue> value = ToCefValue(arguments[0], 0);
+        if (!value || value->GetType() != VTYPE_DICTIONARY) return true;
+        CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create("plinth.media");
+        message->GetArgumentList()->SetValue(0, value);
+        frame_->SendProcessMessage(PID_BROWSER, message);
+        return true;
+    }
+
+private:
+    CefRefPtr<CefFrame> frame_;
+    IMPLEMENT_REFCOUNTING(MediaPost);
+};
+
 class HelperApp : public CefApp, public CefRenderProcessHandler {
 public:
     CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
 
     void OnBrowserCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDictionaryValue> extra) override {
+        if (extra && extra->HasKey("plinth.media")) gMediaScripts[browser->GetIdentifier()] = extra->GetString("plinth.media").ToString();
         if (!extra || !extra->HasKey("plinth.passwords")) return;
         PasswordConfig &config = gPasswordConfigs[browser->GetIdentifier()];
         config.script = extra->GetString("plinth.passwords").ToString();
@@ -115,6 +139,7 @@ public:
     }
 
     void OnBrowserDestroyed(CefRefPtr<CefBrowser> browser) override {
+        gMediaScripts.erase(browser->GetIdentifier());
         auto it = gPasswordConfigs.find(browser->GetIdentifier());
         if (it != gPasswordConfigs.end() && --it->second.live <= 0) gPasswordConfigs.erase(it);
     }
@@ -125,6 +150,16 @@ public:
             CefRefPtr<CefV8Value> ignored;
             CefRefPtr<CefV8Exception> exception;
             context->Eval(kGlobalPrivacyControlScript, CefString(), 0, ignored, exception);
+        }
+        auto media = gMediaScripts.find(browser->GetIdentifier());
+        if (media != gMediaScripts.end() && IsWebAddress(frame->GetURL().ToString())) {
+            CefRefPtr<CefV8Value> factory;
+            CefRefPtr<CefV8Exception> exception;
+            if (context->Eval(media->second, CefString(), 0, factory, exception) && factory && factory->IsFunction()) {
+                CefV8ValueList args;
+                args.push_back(CefV8Value::CreateFunction("post", new MediaPost(frame)));
+                factory->ExecuteFunctionWithContext(context, nullptr, args);
+            }
         }
         auto it = gPasswordConfigs.find(browser->GetIdentifier());
         if (it == gPasswordConfigs.end() || it->second.script.empty() || !IsWebAddress(frame->GetURL().ToString())) return;
